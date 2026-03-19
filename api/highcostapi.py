@@ -65,9 +65,10 @@ def fetch_ads_agg(ad_account_id: str, days: int, page_id: Optional[str] = None) 
             ON s.adset_id = a.adset_id
         LEFT JOIN campaigns c
             ON c.campaign_id = a.campaign_id
-        WHERE a.ad_account_id = %s
+        WHERE c.ad_account_id = %s
           AND i.date >= %s
           {page_filter_sql}
+          
         GROUP BY
             i.ad_id, a.name, a.adset_id, s.name, a.campaign_id, c.name
         """,
