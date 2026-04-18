@@ -148,57 +148,64 @@ def update_ad_with_creative(
 # =========================
 # Service
 # =========================
+ADS_WITH_CREATIVE_FIELDS = (
+    "id,name,effective_status,"
+    "creative{"
+    "id,name,body,effective_object_story_id,instagram_permalink_url,link_url,"
+    "thumbnail_url,video_id,object_story_spec"
+    "}"
+)
 def sync_creatives_for_account(
-    user_token: str,
+    client, 
     ad_account_id: int,
-    portfolio_code: str = "",
-    mode: str = "incremental",   # full | incremental
+    mode: str = "incremental",
     days: int = 30,
 ) -> Dict[str, int]:
-    """
-    Fetch ads under act_ with embedded creative.
-    Avoids per-ad requests (no get_object needed).
-    """
-    client = MetaGraphClient(user_token)
     act = f"act_{ad_account_id}"
+    
+    # Meta's 'ad.updated_time' filter requires a UNIX timestamp (seconds)
+    cutoff_ts = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
 
-    saved = 0
-    skipped = 0
-    failed = 0
-
-    cutoff = _cutoff(days)
-
-    params = {"fields": ADS_WITH_CREATIVE_FIELDS, "limit": 200}
-
+    # 1. Initialize filters list
+    # Note: We remove the 'ACTIVE' filter here to ensure we get "all data" as you requested
+    filters = []
+    
+    # 2. Add time filter for incremental speed
     if mode == "incremental":
-        # ✅ Use UNIX timestamp (seconds) for filtering value
-        params["filtering"] = json.dumps([{
-            "field": "ad.updated_time",
-            "operator": "GREATER_THAN",
-            "value": int(cutoff.timestamp())
-        }])
+        filters.append({
+            "field": "ad.updated_time", 
+            "operator": "GREATER_THAN", 
+            "value": cutoff_ts
+        })
 
-    logger.info(f"▶️ creatives sync start {act} portfolio={portfolio_code} mode={mode} days={days}")
+    # 3. Correctly structure the params
+    params = {
+        "fields": ADS_WITH_CREATIVE_FIELDS, 
+        "limit": 200, # Creative objects are heavy; 100 is safer than 250
+        "filtering": json.dumps(filters) if filters else None
+    }
+
+    saved, skipped = 0, 0
+    logger.info(f"▶️ creatives sync start {act} mode={mode}")
 
     try:
         for ad in client.get_paged(f"{act}/ads", params=params):
-            ad_id = _safe_int(ad.get("id"))
-            if not ad_id:
+            ad_id = int(ad["id"])
+            creative = ad.get("creative")
+            
+            if not creative or not creative.get("id"):
                 skipped += 1
                 continue
 
-            creative = ad.get("creative") or {}
-            cr_id = _safe_int(creative.get("id"))
-            if not cr_id:
-                skipped += 1
-                continue
-
+            cr_id = int(creative["id"])
             eosid = creative.get("effective_object_story_id")
-
+            
+            # Extract Page ID
             page_id = None
-            if isinstance(eosid, str) and "_" in eosid:
-                page_id = _safe_int(eosid.split("_", 1)[0])
+            if eosid and "_" in str(eosid):
+                page_id = str(eosid).split("_")[0]
 
+            # 4. Upsert the Creative Metadata
             upsert_creative({
                 "creative_id": cr_id,
                 "name": creative.get("name"),
@@ -208,11 +215,11 @@ def sync_creatives_for_account(
                 "link_url": creative.get("link_url"),
                 "page_id": page_id,
                 "thumbnail_url": creative.get("thumbnail_url"),
-                "video_id": _safe_int(creative.get("video_id")),
-                "creative_sourcing_spec": _json_or_none(creative.get("object_story_spec")),
+                "video_id": creative.get("video_id"),
+                "creative_sourcing_spec": json.dumps(creative.get("object_story_spec")) if creative.get("object_story_spec") else None,
             })
 
-            # ✅ FK safe: insert creative first, then update ad with creative_id
+            # 5. Link the Ad to the Creative
             update_ad_with_creative(
                 ad_id=ad_id,
                 creative_id=cr_id,
@@ -221,26 +228,20 @@ def sync_creatives_for_account(
                 link_url=creative.get("link_url"),
                 instagram_permalink_url=creative.get("instagram_permalink_url"),
             )
-
             saved += 1
+            if saved % 50 == 0:
+                logger.info(f"⏳ {act} progress: {saved} creatives saved...")
+
+        return {"saved": saved, "skipped": skipped}
 
     except Exception as e:
-        msg = str(e)
-        # fallback if filtering rejected
-        if mode == "incremental" and ("filtering" in msg or "param filtering" in msg):
-            logger.warning(f"⚠️ filtering rejected for {act}/ads, fallback to full. err={e}")
-            return sync_creatives_for_account(
-                user_token=user_token,
-                ad_account_id=ad_account_id,
-                portfolio_code=portfolio_code,
-                mode="full",
-                days=days,
-            )
-        logger.error(f"❌ creatives failed {act} portfolio={portfolio_code}: {e}")
-        failed += 1
-
-    logger.info(f"✅ creatives sync done {act} portfolio={portfolio_code} saved={saved} skipped={skipped} failed={failed}")
-    return {"saved": saved, "skipped": skipped, "failed": failed}
+        # Fallback logic for filtering errors
+        if "filtering" in str(e).lower() and mode == "incremental":
+            logger.warning(f"⚠️ Filtering rejected for {act}, falling back to full.")
+            return sync_creatives_for_account(client, ad_account_id, mode="full", days=days)
+        
+        logger.error(f"❌ creatives failed {act}: {e}")
+        raise e
 
 
 def sync_creatives(user_token: str, mode: str = "incremental", days: int = 30) -> Dict[str, int]:

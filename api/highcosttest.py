@@ -10,21 +10,31 @@ from db.db import query_dict
 # =========================
 def fetch_ads():
     rows = query_dict("""
-        SELECT
-            a.ad_id,
-            a.name AS ad_name,
-            a.adset_id,
-            a.campaign_id,
-            c.ad_account_id AS account_id,
-            acc.currency AS account_currency,
-            SUM(i.spend) AS spend,
-            SUM(i.results) AS results
-        FROM ad_daily_insights i
-        JOIN ads a ON a.ad_id = i.ad_id
-        JOIN campaigns c ON c.campaign_id = a.campaign_id
-        LEFT JOIN ad_accounts acc ON acc.ad_account_id = c.ad_account_id
-        WHERE i.date >= CURDATE() - INTERVAL 5 DAY
-        GROUP BY a.ad_id
+         SELECT 
+    a.ad_id,
+    a.name AS ad_name,
+    a.adset_id,
+    a.campaign_id,
+    c.ad_account_id AS account_id,
+    acc.currency AS account_currency,
+    SUM(i.spend) AS spend,
+    SUM(i.results) AS results
+FROM
+    ad_daily_insights i
+        JOIN
+    ads a ON a.ad_id = i.ad_id
+        JOIN
+    campaigns c ON c.campaign_id = a.campaign_id
+        LEFT JOIN
+    ad_accounts acc ON acc.ad_account_id = c.ad_account_id
+WHERE
+    i.date >= CURDATE() - INTERVAL 5 DAY
+        AND c.status = 'ACTIVE'
+        AND c.effective_status = 'ACTIVE'
+        AND c.real_status = 'ACTIVE'
+        AND a.status = 'ACTIVE'
+        AND a.effective_status = 'ACTIVE'
+GROUP BY a.ad_id
     """)
     return pd.DataFrame(rows)
 
@@ -71,10 +81,9 @@ def process_data():
 
     # cost per result
     df_ads["cost_per_result"] = df_ads.apply(
-        lambda r: (r["spend"] / r["results"]) if r["results"] and r["results"] > 0 else None,
+        lambda r: round(r["spend"] / r["results"], 2) if r["results"] and r["results"] > 0 else None,
         axis=1
     )
-
     # merge
     merged = pd.merge(
         df_ads,
@@ -83,7 +92,7 @@ def process_data():
         how="left"
     )
 
-    merged["avg_cost"] = merged["avg_cost"].fillna(0).astype(float)
+    merged["avg_cost"] = merged["avg_cost"].fillna(0).astype(float).round(2)
 
     # threshold
     def calc_threshold(row):
@@ -94,7 +103,7 @@ def process_data():
             return avg_cost + 5.0
         return avg_cost + 1.3
 
-    merged["threshold"] = merged.apply(calc_threshold, axis=1)
+    merged["threshold"] = merged.apply(calc_threshold, axis=1).round(2)
 
     return merged
 

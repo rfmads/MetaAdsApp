@@ -93,7 +93,7 @@ def sync_instagram_posts_last_60_days(user_token: str) -> None:
                 params={
                     "fields": IG_MEDIA_FIELDS,
                     "since": since_ts,
-                    "limit": 100
+                    "limit": 200
                 }
             ):
                 ig_media_id = item.get("id")

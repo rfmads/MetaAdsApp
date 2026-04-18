@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 from typing import Any, Dict, Optional
+from xmlrpc import client
 
 from logs.logger import logger
 from integrations.meta_graph_client import MetaObjectAccessError
@@ -134,98 +136,120 @@ def upsert_ad(r: dict) -> None:
 # =========================
 # Service (thread-safe per account)
 # =========================
-def sync_ads_for_account(
-    client,                     # ✅ injected MetaGraphClient (from thread)
-    ad_account_id: int,
-    portfolio_code: str = "",
-    mode: str = "full",          # full | incremental
-    days: int = 30
-) -> Dict[str, int]:
+
+ADS_FIELDS = "id,name,status,effective_status,adset_id,campaign_id,updated_time,creative{id,thumbnail_url,image_url,object_story_id}"
+
+# def sync_ads_for_account(client, ad_account_id, mode="full", days=30):
+#     act = f"act_{ad_account_id}"
+#     cutoff_str = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d')
+
+#     filters = []
+#     if mode == "incremental":
+#         filters.append({"field": "updated_time", "operator": "GREATER_THAN", "value": cutoff_str})
+ 
+#     # REDUCED LIMIT to 100 to prevent "Please reduce the amount of data" error
+#     params = {"fields": ADS_FIELDS, "limit": 100, "filtering": json.dumps(filters)}
+
+#     saved = 0
+#     try:
+#         for raw_ad in client.get_paged(f"{act}/ads", params=params):
+#             ad = _normalize_keys(raw_ad)
+            
+#             creative = ad.get("creative") or {}
+#             record = {
+#                 "ad_id": int(ad.get("id")),
+#                 "adset_id": int(ad.get("adset_id")),
+#                 "campaign_id": int(ad.get("campaign_id")),
+#                 "name": ad.get("name"),
+#                 "status": ad.get("status"),
+#                 "effective_status": ad.get("effective_status"),
+#                 "thumbnail_url": creative.get("thumbnail_url"),
+#                 "image_url": creative.get("image_url"),
+#                 "post_id": creative.get("object_story_id"),
+#                 "post_link": ad.get("post_link")
+#             }
+#             upsert_ad(record)
+#             saved += 1
+            
+#         return {"level": "Ads", "account": act, "saved": saved, "ok": True}
+#     except Exception as e:
+#         logger.error(f"❌ Ads sync failed for {act}: {e}")
+#         return {"level": "Ads", "account": act, "saved": saved, "ok": False, "error": str(e)}
+    
+
+# Replace your existing upsert_ad and update the sync function
+def upsert_ads_batch(records: list[dict]) -> None:
+    if not records:
+        return
+
+    sql = """
+    INSERT INTO ads (
+        ad_id, adset_id, campaign_id, name, status,
+        effective_status, thumbnail_url, image_url,
+        post_id, post_link, updated_at
+    ) VALUES (
+        %(ad_id)s, %(adset_id)s, %(campaign_id)s, %(name)s, %(status)s,
+        %(effective_status)s, %(thumbnail_url)s, %(image_url)s,
+        %(post_id)s, %(post_link)s, NOW()
+    )
+    ON DUPLICATE KEY UPDATE
+        adset_id=VALUES(adset_id),
+        campaign_id=VALUES(campaign_id),
+        name=VALUES(name),
+        status=VALUES(status),
+        effective_status=VALUES(effective_status),
+        thumbnail_url=VALUES(thumbnail_url),
+        image_url=VALUES(image_url),
+        post_id=VALUES(post_id),
+        post_link=VALUES(post_link),
+        updated_at=NOW();
     """
-    Sync ads for ONE ad account using:
-      ✅ act_{ad_account_id}/ads   (instead of adset_id/ads)
-
-    mode:
-      - full: upsert all ads returned for the account
-      - incremental: only ads updated within last `days` (based on Meta updated_time)
-
-    Returns:
-      {"saved": x, "skipped": y, "failed_ads": z}
-    """
-    act = f"act_{ad_account_id}"
-    act_id = f"act_{ad_account_id}"
-    cutoff_dt = _cutoff(days)
-
-    saved = 0
-    skipped = 0
-    failed_ads = 0
-
-    logger.info(f"▶️ ads sync start {act} portfolio={portfolio_code} mode={mode} days={days}")
-
+    # Assuming your db module has a way to get a raw connection or an executemany wrapper
+    from db.db import get_connection 
+    conn = get_connection()
+    cursor = conn.cursor()
     try:
-        for ad in client.get_paged(
-            f"{act_id}/ads",
-            params={"fields": ADS_FIELDS, "limit": 200}
-        ):
-            ad = _normalize_keys(ad)
+        cursor.executemany(sql, records)
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
 
-            ad_id = ad.get("id")
-            if not ad_id:
-                skipped += 1
-                continue
+def sync_ads_for_account(client, ad_account_id, mode="full", days=30):
+    act = f"act_{ad_account_id}"
+    cutoff_str = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d')
 
-            # incremental filter using Meta updated_time
-            if mode == "incremental":
-                updated = _as_utc(parse_meta_datetime(ad.get("updated_time")))
-                if not (updated and updated >= cutoff_dt):
-                    skipped += 1
-                    continue
+    filters = []
+    if mode == "incremental":
+        filters.append({"field": "updated_time", "operator": "GREATER_THAN", "value": cutoff_str})
+ 
+    params = {"fields": ADS_FIELDS, "limit": 100, "filtering": json.dumps(filters)}
 
-            creative = _normalize_keys(ad.get("creative") or {})
-
-            # adset_id is FK in DB (NOT NULL). If missing -> skip (avoid FK crash)
-            adset_id = _safe_int(ad.get("adset_id"))
-            if not adset_id:
-                skipped += 1
-                continue
-
-            record = {
-                "ad_id": int(ad_id),
-                "adset_id": adset_id,
-                "campaign_id": _safe_int(ad.get("campaign_id")),
+    all_records = []
+    try:
+        for raw_ad in client.get_paged(f"{act}/ads", params=params):
+            ad = _normalize_keys(raw_ad)
+            creative = ad.get("creative") or {}
+            all_records.append({
+                "ad_id": int(ad.get("id")),
+                "adset_id": int(ad.get("adset_id")),
+                "campaign_id": int(ad.get("campaign_id")),
                 "name": ad.get("name"),
                 "status": ad.get("status"),
                 "effective_status": ad.get("effective_status"),
                 "thumbnail_url": creative.get("thumbnail_url"),
                 "image_url": creative.get("image_url"),
-
-                # ✅ store object_story_id into post_id (your schema)
                 "post_id": creative.get("object_story_id"),
-
-                # optional (Meta doesn't always provide a direct link)
-                "post_link": None,
-            }
-
-            upsert_ad(record)
-            saved += 1
-
-        logger.info(
-            f"✅ ads synced for {act} portfolio={portfolio_code} "
-            f"saved={saved} skipped={skipped} failed_ads={failed_ads}"
-        )
-        return {"saved": saved, "skipped": skipped, "failed_ads": failed_ads}
-
-    except MetaObjectAccessError as e:
-        # rare: account/object access issues
-        logger.warning(f"⚠️ ads skipped {act} portfolio={portfolio_code}: {e}")
-        return {"saved": saved, "skipped": skipped, "failed_ads": failed_ads + 1}
-
+                "post_link": ad.get("post_link")
+            })
+        
+        if all_records:
+            upsert_ads_batch(all_records)
+            
+        return {"level": "Ads", "account": act, "saved": len(all_records), "ok": True}
     except Exception as e:
-        logger.error(f"❌ ads failed for {act} portfolio={portfolio_code}: {e}")
-        return {"saved": saved, "skipped": skipped, "failed_ads": failed_ads + 1}
-
-
-# Optional legacy wrapper
+        logger.error(f"❌ Ads sync failed for {act}: {e}")
+        return {"level": "Ads", "account": act, "saved": len(all_records), "ok": False, "error": str(e)}    
 def sync_ads(user_token: str, mode: str = "full", days: int = 30) -> Dict[str, int]:
     """
     Legacy wrapper: NOT threaded. Prefer sync_ads_for_account(client, ...)

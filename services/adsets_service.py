@@ -1,142 +1,71 @@
 # services/adsets_service.py
 
+# services/adsets_service.py
+
 from datetime import datetime, timedelta, timezone
+# REMOVED: from http import client (This was causing a conflict)
+import json # Use standard json for the filters
 
 from logs.logger import logger
 from db.db import query_dict
 from db.repositories.adsets_repo import upsert_adset
-from utils.datetime_utils import parse_meta_datetime
+from services.ads_service import _normalize_keys
+from services.campaigns_service import _parse_dt
 
+# ✅ Configuration
+ADSET_FIELDS = "id,name,status,effective_status,daily_budget,start_time,updated_time,campaign_id"
 
-# ✅ Fetch adsets directly from ad account (LESS REQUESTS)
-# We MUST include campaign_id so we can save FK to campaigns table.
-FIELDS = (
-    "id,name,status,effective_status,daily_budget,start_time,updated_time,"
-    "billing_event,optimization_goal,campaign_id"
-)
-
-
-def _as_utc(dt):
-    """Ensure datetime is timezone-aware UTC."""
-    if not dt:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
-
-
-def sync_adsets_for_account(
-    client,                     # ✅ injected MetaGraphClient (from thread)
-    ad_account_id: int,
-    portfolio_code: str = "",
-    mode: str = "full",
-    days: int = 30,
-) -> dict:
+def sync_adsets_for_account(client, ad_account_id, mode="full", days=30, **kwargs):
     """
-    Sync adsets for ONE ad account using:
-      ✅ act_{ad_account_id}/adsets   (instead of campaign_id/adsets)
-
-    mode:
-      - full: insert/update all adsets
-      - incremental: only adsets updated/start within last `days`
-
-    Returns:
-      {"ok": bool, "saved": int, "skipped": int, "missing_campaigns": int}
+    kwargs allows passing 'portfolio_code' without crashing if it's sent 
+    from the main loop but not used here.
     """
-    act_id = f"act_{ad_account_id}"
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    act = f"act_{ad_account_id}"
+    cutoff_str = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d')
+
+    # filters = [{"field": "effective_status", "operator": "IN", "value": ["ACTIVE"]}]
+    filters = []
+    if mode == "incremental":
+        # filters.append({"field": "updated_time", "operator": "GREATER_THAN", "value": cutoff_str})
+        filters.append({"field": "updated_time", "operator": "GREATER_THAN", "value": cutoff_str})
+# 
+    params = {
+        "fields": ADSET_FIELDS, 
+        "limit": 150,
+        "filtering": json.dumps(filters)
+    }
 
     saved = 0
-    skipped = 0
-    missing_campaigns = 0
-
-    # Optional: load existing campaigns for this account to avoid FK failures
-    # (Because adsets.campaign_id has FK to campaigns.campaign_id)
-    existing_campaigns = set()
+    all_records = []
     try:
-        rows = query_dict(
-            """
-            SELECT campaign_id
-            FROM campaigns
-            WHERE ad_account_id = %(ad_account_id)s
-            """,
-            {"ad_account_id": ad_account_id},
-        )
-        existing_campaigns = {int(r["campaign_id"]) for r in rows}
-    except Exception:
-        # If query fails, we still continue; FK errors will show in logs.
-        existing_campaigns = set()
-
-    try:
-        for a in client.get_paged(f"{act_id}/adsets", {"fields": FIELDS, "limit": 200}):
-            # Parse dates
-            updated = _as_utc(parse_meta_datetime(a.get("updated_time")))
-            start = _as_utc(parse_meta_datetime(a.get("start_time")))
-
-            if mode == "incremental":
-                if not ((updated and updated >= cutoff) or (start and start >= cutoff)):
-                    skipped += 1
-                    continue
-
-            # campaign_id is required for FK
-            campaign_id = a.get("campaign_id")
-            if not campaign_id:
-                skipped += 1
-                continue
-
-            campaign_id_int = int(campaign_id)
-
-            # Avoid FK error: if campaign not found in DB, skip & count it
-            # (This can happen if campaigns sync failed or partial because of rate limit)
-            if existing_campaigns and campaign_id_int not in existing_campaigns:
-                missing_campaigns += 1
-                skipped += 1
-                continue
-
-            upsert_adset({
-                "adset_id": int(a["id"]),
-                "campaign_id": campaign_id_int,
-                "ad_account_id": int(ad_account_id),
-                "name": a.get("name"),
-                "status": a.get("status"),
-                "effective_status": a.get("effective_status"),
-                "daily_budget": a.get("daily_budget"),
-                "start_time": start.replace(tzinfo=None) if start else None,  # MySQL datetime naive
-                "billing_event": a.get("billing_event"),
-                "optimization_goal": a.get("optimization_goal"),
+        for raw_adset in client.get_paged(f"{act}/adsets", params=params):
+            adset = _normalize_keys(raw_adset)
+            all_records.append({
+                "adset_id": int(adset["id"]),
+                "campaign_id": int(adset["campaign_id"]),
+                "ad_account_id": ad_account_id,
+                "name": adset.get("name"),
+                "status": adset.get("status"),
+                "effective_status": adset.get("effective_status"),
+                "daily_budget": adset.get("daily_budget"),
+                "start_time": _parse_dt(adset.get("start_time")),
+                "billing_event": adset.get("billing_event"),
+                "optimization_goal": adset.get("optimization_goal")
             })
-            saved += 1
-
-        logger.info(
-            f"✅ adsets synced for {act_id} portfolio={portfolio_code} "
-            f"saved={saved} skipped={skipped} missing_campaigns={missing_campaigns}"
-        )
-        return {
-            "ok": True,
-            "saved": saved,
-            "skipped": skipped,
-            "missing_campaigns": missing_campaigns,
-        }
-
+        
+        if all_records:
+            # You'll need to create this batch function in your repo
+            from db.repositories.adsets_repo import upsert_adsets_batch 
+            upsert_adsets_batch(all_records)
+            
+        return {"level": "Adsets", "account": act, "saved": len(all_records), "ok": True}
     except Exception as e:
-        logger.error(f"❌ adsets failed for {act_id} portfolio={portfolio_code}: {e}")
-        return {
-            "ok": False,
-            "saved": saved,
-            "skipped": skipped,
-            "missing_campaigns": missing_campaigns,
-            "error": str(e),
-        }
-
+        logger.error(f"❌ Adset sync failed for {act}: {e}")
+        return {"ok": False, "saved": 0, "error": str(e)}
 
 def sync_adsets(user_token: str) -> None:
-    """
-    Backward-compatible: sync adsets for ALL accounts (not threaded).
-    Threaded runner should call sync_adsets_for_account(client, ...) instead.
-    """
     from integrations.meta_graph_client import MetaGraphClient
-
-    client = MetaGraphClient(user_token)
+    client_instance = MetaGraphClient(user_token)
 
     accounts = query_dict("""
         SELECT a.ad_account_id, p.code AS portfolio_code
@@ -147,13 +76,12 @@ def sync_adsets(user_token: str) -> None:
     """)
 
     total_saved = 0
-    total_skipped = 0
-    total_missing_campaigns = 0
     failed_accounts = 0
 
     for row in accounts:
+        # Pass the client_instance clearly
         res = sync_adsets_for_account(
-            client=client,
+            client=client_instance,
             ad_account_id=int(row["ad_account_id"]),
             portfolio_code=row["portfolio_code"],
             mode="incremental",
@@ -161,13 +89,94 @@ def sync_adsets(user_token: str) -> None:
         )
 
         total_saved += res.get("saved", 0)
-        total_skipped += res.get("skipped", 0)
-        total_missing_campaigns += res.get("missing_campaigns", 0)
-
         if not res.get("ok"):
             failed_accounts += 1
 
-    logger.info(
-        f"✅ adsets sync done. saved={total_saved} skipped={total_skipped} "
-        f"missing_campaigns={total_missing_campaigns} failed_accounts={failed_accounts}"
-    )
+    logger.info(f"✅ Adsets sync done. Total saved: {total_saved}. Failed accounts: {failed_accounts}")
+
+# def sync_adsets_for_account(
+#     client, 
+#     ad_account_id: int,
+#     portfolio_code: str = "",
+#     mode: str = "full",
+#     days: int = 30,
+# ) -> dict:
+#     act_id = f"act_{ad_account_id}"
+    
+#     # Calculate cutoff for incremental mode
+#     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+#     # Format for Meta (e.g., 2026-04-15)
+#     cutoff_str = cutoff_date.strftime('%Y-%m-%d')
+
+#     saved = 0
+#     skipped = 0
+#     missing_campaigns = 0
+
+#     # 1. Load existing campaigns to avoid FK failures
+#     existing_campaigns = set()
+#     try:
+#         rows = query_dict(
+#             "SELECT campaign_id FROM campaigns WHERE ad_account_id = %(ad_account_id)s",
+#             {"ad_account_id": ad_account_id},
+#         )
+#         existing_campaigns = {int(r["campaign_id"]) for r in rows}
+#     except Exception:
+#         existing_campaigns = set()
+
+#     try:
+#         # ✅ Prepare Filters
+#         # We only want ACTIVE adsets. 
+#         # In incremental mode, we ALSO only want adsets updated recently.
+#         filters = [
+#             {"field": "effective_status", "operator": "IN", "value": ["ACTIVE"]}
+#         ]
+        
+#         if mode == "incremental":
+#             filters.append({"field": "updated_time", "operator": "GREATER_THAN", "value": cutoff_str})
+
+#         params = {
+#             "fields": FIELDS,
+#             "limit": 250, # Higher limit is faster
+#             "filtering": json.dumps(filters)
+#         }
+
+#         logger.info(f"▶️ adsets sync start {act_id} (ACTIVE + {mode})")
+
+#         # ✅ get_paged now receives much less data
+#         for a in client.get_paged(f"{act_id}/adsets", params=params):
+            
+#             campaign_id = a.get("campaign_id")
+#             if not campaign_id:
+#                 skipped += 1
+#                 continue
+
+#             campaign_id_int = int(campaign_id)
+
+#             # Avoid FK error
+#             if existing_campaigns and campaign_id_int not in existing_campaigns:
+#                 missing_campaigns += 1
+#                 skipped += 1
+#                 continue
+
+#             start = _as_utc(parse_meta_datetime(a.get("start_time")))
+
+#             upsert_adset({
+#                 "adset_id": int(a["id"]),
+#                 "campaign_id": campaign_id_int,
+#                 "ad_account_id": int(ad_account_id),
+#                 "name": a.get("name"),
+#                 "status": a.get("status"),
+#                 "effective_status": a.get("effective_status"),
+#                 "daily_budget": a.get("daily_budget"),
+#                 "start_time": start.replace(tzinfo=None) if start else None,
+#                 "billing_event": a.get("billing_event"),
+#                 "optimization_goal": a.get("optimization_goal"),
+#             })
+#             saved += 1
+
+#         logger.info(f"✅ adsets synced {act_id} saved={saved} skipped={skipped}")
+#         return {"ok": True, "saved": saved, "skipped": skipped, "missing_campaigns": missing_campaigns}
+
+#     except Exception as e:
+#         logger.error(f"❌ adsets failed for {act_id}: {e}")
+#         return {"ok": False, "saved": saved, "skipped": skipped, "missing_campaigns": missing_campaigns, "error": str(e)}
