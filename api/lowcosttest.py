@@ -107,9 +107,9 @@ def process_data():
 # =========================
 # 🔹 API: Low Cost Ads
 # =========================
-def low_cost_ads():
+def low_cost_ads(ad_account_id):
     try:
-        ad_account_id = request.args.get("ad_account_id")
+        # ad_account_id = request.args.get("ad_account_id")
 
         if not ad_account_id:
             return jsonify({"error": "Missing ad_account_id"}), 400

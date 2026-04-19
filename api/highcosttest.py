@@ -111,10 +111,9 @@ def process_data():
 # =========================
 # 🔹 API: High Cost Ads
 # =========================
-def high_cost_ads():
-    try:
-        ad_account_id = request.args.get("ad_account_id")
 
+def high_cost_ads(ad_account_id):
+    try:
         if not ad_account_id:
             return jsonify({"error": "Missing ad_account_id"}), 400
 
@@ -123,10 +122,8 @@ def high_cost_ads():
         if df.empty:
             return jsonify({"data": [], "message": "No data found"})
 
-        # توحيد النوع للمقارنة
         df["account_id"] = df["account_id"].astype(str)
-
-        df = df[df["account_id"] == ad_account_id]
+        df = df[df["account_id"] == str(ad_account_id)]
 
         if df.empty:
             return jsonify({
@@ -157,6 +154,52 @@ def high_cost_ads():
             "error": str(e),
             "trace": traceback.format_exc()
         }), 500
+# def high_cost_ads():
+#     try:
+#         ad_account_id = request.args.get("ad_account_id")
+
+#         if not ad_account_id:
+#             return jsonify({"error": "Missing ad_account_id"}), 400
+
+#         df = process_data()
+
+#         if df.empty:
+#             return jsonify({"data": [], "message": "No data found"})
+
+#         # توحيد النوع للمقارنة
+#         df["account_id"] = df["account_id"].astype(str)
+
+#         df = df[df["account_id"] == ad_account_id]
+
+#         if df.empty:
+#             return jsonify({
+#                 "data": [],
+#                 "message": "No data for this ad account"
+#             })
+
+#         high_cost = df[
+#             (df["cost_per_result"].notnull()) &
+#             (df["cost_per_result"] > df["threshold"])
+#         ]
+
+#         result = high_cost[[
+#             "ad_id",
+#             "ad_name",
+#             "cost_per_result",
+#             "threshold"
+#         ]]
+
+#         return jsonify({
+#             "ad_account_id": ad_account_id,
+#             "count": len(result),
+#             "data": result.to_dict(orient="records")
+#         })
+
+#     except Exception as e:
+#         return jsonify({
+#             "error": str(e),
+#             "trace": traceback.format_exc()
+#         }), 500
 
 
 # =========================

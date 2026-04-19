@@ -1,0 +1,116 @@
+swagger: "2.0"
+
+info:
+  title: Meta Ads Pipeline API
+  version: "1.0.0"
+  description: API for managing Meta Ads pipeline, jobs, and configuration.
+
+host: 127.0.0.1:5001
+basePath: /
+
+schemes:
+  - http
+
+tags:
+  - name: Pipeline
+  - name: Monitoring
+  - name: Configuration
+
+paths:
+
+  /api/run-pipeline:
+    get:
+      tags: [Pipeline]
+      summary: Run pipeline
+      parameters:
+        - name: include_static
+          in: query
+          type: boolean
+      responses:
+        200:
+          description: Pipeline started
+        409:
+          description: Job already running
+
+  /api/stop-job:
+    get:
+      tags: [Pipeline]
+      summary: Stop job
+      parameters:
+        - name: job_id
+          in: query
+          type: integer
+      responses:
+        200:
+          description: Job stopped
+
+  /api/job:
+    get:
+      tags: [Monitoring]
+      summary: Get job details
+      parameters:
+        - name: job_id
+          in: query
+          type: integer
+      responses:
+        200:
+          description: Job data
+
+  /api/job-health:
+    get:
+      tags: [Monitoring]
+      summary: Check stuck jobs
+      responses:
+        200:
+          description: Health status
+
+  /api/cleanup-stuck-jobs:
+    get:
+      tags: [Monitoring]
+      summary: Cleanup stuck jobs
+      responses:
+        200:
+          description: Cleanup complete
+
+  /api/config-status:
+    get:
+      tags: [Configuration]
+      summary: Validate token
+      responses:
+        200:
+          description: Token valid
+        400:
+          description: Invalid token
+
+  /api/config-update:
+    get:
+      tags: [Configuration]
+      summary: Update config
+      parameters:
+        - name: key
+          in: query
+          required: true
+          type: string
+        - name: value
+          in: query
+          required: true
+          type: string
+      responses:
+        200:
+          description: Updated
+
+  /api/config-all:
+    get:
+      tags: [Configuration]
+      summary: Get all configs
+      responses:
+        200:
+          description: Config list
+
+  /health:
+    get:
+      tags: [Monitoring]
+      summary: System health
+      responses:
+        200:
+          description: OK

@@ -1,0 +1,8 @@
+Database Connect
+ssh root@82.29.180.15
+password: M@gicFinity@2026
+mysql -u root -p'P@$$w0rd'
+use MetaAdsdb;
+Change Code on server
+deploy-metaads
+rollback 

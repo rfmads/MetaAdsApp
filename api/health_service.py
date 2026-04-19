@@ -1,13 +1,11 @@
 from datetime import datetime
-from flask import jsonify
 from db.db import query_dict
 
-def health():
+
+def get_health_status():
     try:
-        # ✅ check DB connection
         query_dict("SELECT 1")
 
-        # ✅ check if pipeline stuck
         running_job = query_dict("""
             SELECT id, started_at
             FROM pipeline_jobs
@@ -16,7 +14,7 @@ def health():
             LIMIT 1
         """)
 
-        return jsonify({
+        return {
             "status": "ok",
             "time": datetime.utcnow().isoformat(),
             "database": "connected",
@@ -24,11 +22,11 @@ def health():
                 "running": bool(running_job),
                 "job_id": running_job[0]["id"] if running_job else None
             }
-        })
+        }
 
     except Exception as e:
-        return jsonify({
+        return {
             "status": "error",
             "time": datetime.utcnow().isoformat(),
             "error": str(e)
-        }), 500
+        }
