@@ -20,7 +20,7 @@ app.add_url_rule("/api/high-cost-ads", view_func=high_cost_ads, methods=["GET"])
 
 app.add_url_rule("/api/low-cost-ads", view_func=low_cost_ads, methods=["GET"])
 
-app.add_url_rule("/api/health", view_func=health, methods=["GET"])
+app.add_url_rule("/health", view_func=health, methods=["GET"])
 
 @app.route("/api/config-status", methods=["GET"])
 def config_status():
