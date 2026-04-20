@@ -1,7 +1,5 @@
 
 from flask import Flask
-from flasgger import Swagger
-
 # Standard Flask Blueprints (Imported from your files)
 from api.resources.health import health_bp
 from api.resources.config import config_bp
