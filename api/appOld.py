@@ -1,13 +1,9 @@
 from http.client import HTTPException
 import threading
-
 from flask import Flask, jsonify, request
-from threading import Thread
-
 from api.highcosttest import high_cost_ads
 from api.lowcosttest import low_cost_ads
 from api.health_service import health
-
 from db.config_store import get_config
 from db.db import execute, query_dict
 from services.job_service import create_job, get_running_job, update_job_status
