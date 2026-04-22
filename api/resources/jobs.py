@@ -46,6 +46,45 @@ def get_job():
         "logs": logs
     })
 
+@jobs_bp.route("/get_results", methods=["GET"])
+def get_results():
+    job_id = request.args.get("job_id")
+
+    if not job_id:
+        return jsonify({
+            "error": {
+                "message": "job_id is required"
+            }
+        }), 400
+
+    job_data = query_dict(
+        "SELECT * FROM pipeline_jobs WHERE id=%s",
+        (job_id,)
+    )
+
+    if not job_data:
+        return jsonify({
+            "error": {
+                "message": "Job not found"
+            }
+        }), 404
+
+    job = job_data[0]
+
+    # ⏳ Still running
+    if job["status"] != "COMPLETED":
+        return jsonify({
+            "status": job["status"]
+        }), 202
+
+    # ✅ THIS IS THE MOST IMPORTANT PART
+    results = query_dict(
+        "SELECT * FROM pipeline_results WHERE job_id=%s",
+        (job_id,)
+    )
+
+    # 🚨 Return RAW DATA ONLY (no wrapper)
+    return jsonify(results), 200
 # =========================
 # JOB HEALTH
 # =========================
