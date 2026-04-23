@@ -67,7 +67,8 @@ def stop_job():
         "job_id": job_id
     })
 
-@pipeline_bp.route("/get_results<path:token>", methods=["GET"])
+@pipeline_bp.route("/get_results<token>", methods=["GET"])
+@pipeline_bp.route("/get_results/<token>", methods=["GET"])
 def get_results(token):
 
     # OPTIONAL: log token for debugging
