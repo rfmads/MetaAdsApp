@@ -67,8 +67,12 @@ def stop_job():
         "job_id": job_id
     })
 
-@pipeline_bp.route("/get_results", methods=["GET"])
-def get_results():
+@pipeline_bp.route("/get_results<path:token>", methods=["GET"])
+def get_results(token):
+
+    # OPTIONAL: log token for debugging
+    print("Token:", token)
+
     include_static_raw = request.args.get("include_static")
     include_static = None
     if include_static_raw is not None:
@@ -77,7 +81,6 @@ def get_results():
     job = get_latest_completed_job(include_static)
 
     if not job:
-        # run job silently
         job_id = create_job(include_static=include_static)
         update_job_status(job_id, "RUNNING")
 
@@ -95,6 +98,34 @@ def get_results():
     )
 
     return jsonify(format_to_dataslayer(results)), 200
+# @pipeline_bp.route("/get_results", methods=["GET"])
+# def get_results():
+#     include_static_raw = request.args.get("include_static")
+#     include_static = None
+#     if include_static_raw is not None:
+#         include_static = include_static_raw.lower() == "true"
+
+#     job = get_latest_completed_job(include_static)
+
+#     if not job:
+#         # run job silently
+#         job_id = create_job(include_static=include_static)
+#         update_job_status(job_id, "RUNNING")
+
+#         Thread(
+#             target=run_pipeline_job,
+#             args=({"id": job_id, "include_static": include_static},),
+#             daemon=True
+#         ).start()
+
+#         return jsonify({"result": []}), 200
+
+#     results = query_dict(
+#         "SELECT * FROM pipeline_results WHERE job_id=%s",
+#         (job["id"],)
+#     )
+
+#     return jsonify(format_to_dataslayer(results)), 200
 
 def format_to_dataslayer(rows):
     if not rows:
