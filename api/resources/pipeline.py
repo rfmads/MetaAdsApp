@@ -74,11 +74,10 @@ def get_results():
     if include_static_raw is not None:
         include_static = include_static_raw.lower() == "true"
 
-    # check if there is already a completed recent job
     job = get_latest_completed_job(include_static)
 
     if not job:
-        # trigger job silently
+        # run job silently
         job_id = create_job(include_static=include_static)
         update_job_status(job_id, "RUNNING")
 
@@ -88,16 +87,28 @@ def get_results():
             daemon=True
         ).start()
 
-        # ⚠️ IMPORTANT: Dataslayer systems often expect 200, not 202
-        return jsonify([]), 200
+        return jsonify({"result": []}), 200
 
-    # return actual results
     results = query_dict(
         "SELECT * FROM pipeline_results WHERE job_id=%s",
         (job["id"],)
     )
 
-    return jsonify(results), 200
+    return jsonify(format_to_dataslayer(results)), 200
+
+def format_to_dataslayer(rows):
+    if not rows:
+        return {"result": []}
+
+    # Extract headers from keys
+    headers = list(rows[0].keys())
+
+    data = [headers]
+
+    for row in rows:
+        data.append([row[col] for col in headers])
+
+    return {"result": data}
 
 def get_latest_completed_job(include_static=None):
     if include_static is None:
