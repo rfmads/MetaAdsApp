@@ -71,54 +71,60 @@ def stop_job():
 @pipeline_bp.route("/get_results/", defaults={"token": None}, methods=["GET"])
 @pipeline_bp.route("/get_results/<path:token>", methods=["GET"])
 def get_results(token):
-
-    print(">>> HIT:", request.path)
-
-    include_static_raw = request.args.get("include_static")
-    include_static = None
-    if include_static_raw is not None:
-        include_static = include_static_raw.lower() == "true"
-
+    include_static = request.args.get("include_static", "false").lower() == "true"
+    
     job = get_valid_job(include_static)
-
-    # ✅ CASE 1: valid job exists → return immediately
     if job:
-        rows = query_dict(""" 
-                            SELECT 
-                        a.name AS "Account name",
-                        a.ad_account_id AS "Account id",
-                        a.currency AS "Account Currency",
-                        b.balance AS "Balance",
-                        CASE 
-                            WHEN b.account_status = 1 THEN 'ACTIVE'
-                            ELSE 'UNKNOWN'
-                        END AS "Account status",
-                        b.amount_spent AS "Account amount spent",
-                        'PS' AS "Business country code",
-                        COALESCE(SUM(i.results), 0) AS "Clicks",
-                        COALESCE(SUM(i.reach), 0) AS "Reach"
-                    FROM ad_accounts a
-                    LEFT JOIN billing b ON b.ad_account_id = a.ad_account_id
-                    LEFT JOIN adsets s ON s.ad_account_id = a.ad_account_id
-                    LEFT JOIN ads ad ON ad.adset_id = s.adset_id
-                    LEFT JOIN ad_daily_insights i 
-                        ON i.ad_id = ad.ad_id
-                        AND i.date = CURDATE()
-                    GROUP BY a.ad_account_id
-                """)
-
-        return jsonify(format_to_dataslayer(rows)), 200
+        return jsonify(format_to_dataslayer(fetch_account_metrics())), 200
 
     job_id = create_job(include_static=include_static)
     update_job_status(job_id, "RUNNING")
-
+    
+    # Ensure this is blocking if you want the data in the same request
     run_pipeline_job({"id": job_id, "include_static": include_static})
 
-    # after completion → fetch data
-    rows = query_dict(""" SAME QUERY HERE """)
-
-    return jsonify(format_to_dataslayer(rows)), 200
-
+    return jsonify(format_to_dataslayer(fetch_account_metrics())), 200
+#  SELECT 
+#             a.name AS "Account name",
+#             a.ad_account_id AS "Account id",
+#             a.currency AS "Account Currency",
+#             b.balance AS "Balance",
+#             CASE WHEN b.account_status = 1 THEN 'ACTIVE' ELSE 'UNKNOWN' END AS "Account status",
+#             b.amount_spent AS "Account amount spent",
+#             'PS' AS "Business country code",
+#             COALESCE(SUM(i.results), 0) AS "Clicks",
+#             COALESCE(SUM(i.reach), 0) AS "Reach"
+#         FROM ad_accounts a
+#         LEFT JOIN billing b ON b.ad_account_id = a.ad_account_id
+#         LEFT JOIN adsets s ON s.ad_account_id = a.ad_account_id
+#         LEFT JOIN ads ad ON ad.adset_id = s.adset_id
+#         LEFT JOIN ad_daily_insights i ON i.ad_id = ad.ad_id AND i.date = CURDATE()
+#         GROUP BY a.ad_account_id
+def fetch_account_metrics():
+    return query_dict(""" 
+       SELECT 
+    a.name AS 'Account name',
+    a.ad_account_id AS 'Account id',
+    a.currency AS 'Account Currency',
+    b.balance AS 'Balance',
+    CASE
+        WHEN b.account_status = 1 THEN 'ACTIVE'
+        ELSE 'UNKNOWN'
+    END AS 'Account status',
+    b.amount_spent AS 'Account amount spent',
+    'PS' AS 'Business country code',
+    COALESCE(SUM(i.results), 0) AS 'Clicks',
+    COALESCE(SUM(i.reach), 0) AS 'Reach'
+FROM
+    ad_accounts a
+        INNER JOIN
+    billing b ON b.ad_account_id = a.ad_account_id
+        AND b.account_status = 1
+        LEFT JOIN adsets s ON s.ad_account_id = a.ad_account_id
+        LEFT JOIN ads ad ON ad.adset_id = s.adset_id
+        LEFT JOIN ad_daily_insights i ON i.ad_id = ad.ad_id 
+        GROUP BY a.ad_account_id
+    """)
 def format_to_dataslayer(rows):
     if not rows:
         return {"result": []}
@@ -163,7 +169,7 @@ def get_valid_job(include_static=None):
         SELECT *
         FROM pipeline_jobs
         WHERE (status = 'RUNNING'
-               OR (status = 'SUCCESS' AND finished_at >= NOW() - INTERVAL 1 HOUR))
+               OR (status = 'SUCCESS' AND finished_at >= NOW() - INTERVAL 10 HOUR))
         ORDER BY created_at DESC
         LIMIT 1
     """
