@@ -1,8 +1,8 @@
 import time
-
+import uuid
+import logging
 from flask import Blueprint, g, request, jsonify
 from threading import Thread
-
 from db.db import execute, query_dict
 from db.config_store import get_config
 from logs import logger
@@ -11,7 +11,20 @@ from services.pipeline_runner import run_pipeline_job
 
 # Standard Flask Blueprint
 pipeline_bp = Blueprint("pipeline", __name__, url_prefix="/api")
+@pipeline_bp.before_request
+def set_request_id():
+    g.request_id = str(uuid.uuid4())
+    
+logger = logging.getLogger("api_logger")
+logger.setLevel(logging.INFO)
 
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        '%(asctime)s | %(levelname)s | %(message)s'
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)    
 # =========================
 # RUN PIPELINE
 # =========================
@@ -70,90 +83,88 @@ def stop_job():
         "job_id": job_id
     })
 
-
-# @pipeline_bp.route("/get_results/", defaults={"token": None}, methods=["GET"])
-# @pipeline_bp.route("/get_results/<path:token>", methods=["GET"])
-
-# def get_results(token):
-#     start_time = time.time()
-#     job_id = None
-
-#     try:
-#         include_static = request.args.get("include_static", "false").lower() == "true"
-
-#         job = get_valid_job(include_static)
-
-#         if job:
-#             data = format_to_dataslayer(fetch_account_metrics())
-#             duration = int((time.time() - start_time) * 1000)
-
-#             log_to_db({
-#                 # "request_id": g.request_id,
-#                 "endpoint": "/get_results",
-#                 "method": "GET",
-#                 "query_params": request.args.to_dict(),
-#                 "job_id": job_id,
-#                 "status": "SUCCESS",
-#                 "response_code": 200,
-#                 "duration_ms": duration
-#             })
-
-#             return jsonify(data), 200
-
-#         job_id = create_job(include_static=include_static)
-#         update_job_status(job_id, "RUNNING")
-
-#         run_pipeline_job({"id": job_id, "include_static": include_static})
-
-#         data = format_to_dataslayer(fetch_account_metrics())
-#         duration = int((time.time() - start_time) * 1000)
-
-#         log_to_db({
-#             # "request_id": g.request_id,
-#             "endpoint": "/get_results",
-#             "method": "GET",
-#             "query_params": request.args.to_dict(),
-#             "job_id": job_id,
-#             "status": "SUCCESS",
-#             "response_code": 200,
-#             "duration_ms": duration
-#         })
-
-#         return jsonify(data), 200
-
-#     except Exception as e:
-#         duration = int((time.time() - start_time) * 1000)
-
-#         log_to_db({
-#             # "request_id": g.request_id,
-#             "endpoint": "/get_results",
-#             "method": "GET",
-#             "query_params": request.args.to_dict(),
-#             "job_id": job_id,
-#             "status": "ERROR",
-#             "response_code": 500,
-#             "duration_ms": duration,
-#             "error_message": str(e)
-#         })
-
-#         return jsonify({"error": "Internal Server Error"}), 500
-    
 @pipeline_bp.route("/get_results/", defaults={"token": None}, methods=["GET"])
 @pipeline_bp.route("/get_results/<path:token>", methods=["GET"])
 def get_results(token):
-    include_static = request.args.get("include_static", "false").lower() == "true"
-    
-    job = get_valid_job(include_static)
-    if job:
-        return jsonify(format_to_dataslayer(fetch_account_metrics())), 200
+    start_time = time.time()
+    job_id = None
+    status = "SUCCESS"
+    response_code = 200
+    error_message = None
 
-    job_id = create_job(include_static=include_static)
-    update_job_status(job_id, "RUNNING")
-    
-    # Ensure this is blocking if you want the data in the same request
-    run_pipeline_job({"id": job_id, "include_static": include_static})
+    try:
+        include_static = request.args.get("include_static", "false").lower() == "true"
 
-    return jsonify(format_to_dataslayer(fetch_account_metrics())), 200
+        logger.info(f"[{g.request_id}] START /get_results | include_static={include_static}")
+
+        job = get_valid_job(include_static)
+
+        if job:
+            job_id = job.get("id") if isinstance(job, dict) else None
+
+            data = format_to_dataslayer(fetch_account_metrics())
+
+            return jsonify(data), 200
+
+        job_id = create_job(include_static=include_static)
+        logger.info(f"[{g.request_id}] Created job {job_id}")
+
+        update_job_status(job_id, "RUNNING")
+
+        run_pipeline_job({
+            "id": job_id,
+            "include_static": include_static
+        })
+
+        data = format_to_dataslayer(fetch_account_metrics())
+
+        return jsonify(data), 200
+
+    except Exception as e:
+        status = "ERROR"
+        response_code = 500
+        error_message = str(e)
+
+        logger.error(f"[{getattr(g, 'request_id', None)}] ERROR: {error_message}", exc_info=True)
+
+        return jsonify({"error": "Internal Server Error"}), 500
+
+    finally:
+        duration = int((time.time() - start_time) * 1000)
+
+        log_to_db({
+            "request_id": getattr(g, "request_id", None),
+            "endpoint": "/get_results",
+            "method": "GET",
+            "query_params": request.args.to_dict(),
+            "job_id": job_id,
+            "status": status,
+            "response_code": response_code,
+            "duration_ms": duration,
+            "error_message": error_message
+        })
+
+        logger.info(
+            f"[{getattr(g, 'request_id', None)}] END "
+            f"| status={status} | duration={duration}ms | job_id={job_id}"
+        )
+    
+# @pipeline_bp.route("/get_results/", defaults={"token": None}, methods=["GET"])
+# @pipeline_bp.route("/get_results/<path:token>", methods=["GET"])
+# def get_results(token):
+#     include_static = request.args.get("include_static", "false").lower() == "true"
+    
+#     job = get_valid_job(include_static)
+#     if job:
+#         return jsonify(format_to_dataslayer(fetch_account_metrics())), 200
+
+#     job_id = create_job(include_static=include_static)
+#     update_job_status(job_id, "RUNNING")
+    
+#     # Ensure this is blocking if you want the data in the same request
+#     run_pipeline_job({"id": job_id, "include_static": include_static})
+
+#     return jsonify(format_to_dataslayer(fetch_account_metrics())), 200
 
 def fetch_account_metrics():
     return query_dict(""" 
@@ -222,9 +233,17 @@ def log_to_db(data):
     try:
         query = """
         INSERT INTO api_logs (
-             endpoint, method, query_params,
-            job_id, status, response_code, duration_ms, error_message
-        ) VALUES ( %s, %s, %s, %s, %s, %s, %s, %s)
+            request_id,
+            endpoint,
+            method,
+            query_params,
+            job_id,
+            status,
+            response_code,
+            duration_ms,
+            error_message
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
 
         values = (
@@ -239,10 +258,10 @@ def log_to_db(data):
             data.get("error_message")
         )
 
-        execute(query, values)   # adapt to your DB connector
+        execute(query, values)   # <-- your DB function
 
     except Exception as e:
-        logger.error(f"DB logging failed: {str(e)}")
+        logger.error(f"DB logging failed: {str(e)}", exc_info=True)
 def get_valid_job(include_static=None):
     query = """
         SELECT *
