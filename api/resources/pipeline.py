@@ -1,8 +1,11 @@
-from flask import Blueprint, request, jsonify
+import time
+
+from flask import Blueprint, g, request, jsonify
 from threading import Thread
 
 from db.db import execute, query_dict
 from db.config_store import get_config
+from logs import logger
 from services.job_service import create_job, get_running_job, update_job_status
 from services.pipeline_runner import run_pipeline_job
 
@@ -68,6 +71,73 @@ def stop_job():
     })
 
 
+# @pipeline_bp.route("/get_results/", defaults={"token": None}, methods=["GET"])
+# @pipeline_bp.route("/get_results/<path:token>", methods=["GET"])
+
+# def get_results(token):
+#     start_time = time.time()
+#     job_id = None
+
+#     try:
+#         include_static = request.args.get("include_static", "false").lower() == "true"
+
+#         job = get_valid_job(include_static)
+
+#         if job:
+#             data = format_to_dataslayer(fetch_account_metrics())
+#             duration = int((time.time() - start_time) * 1000)
+
+#             log_to_db({
+#                 # "request_id": g.request_id,
+#                 "endpoint": "/get_results",
+#                 "method": "GET",
+#                 "query_params": request.args.to_dict(),
+#                 "job_id": job_id,
+#                 "status": "SUCCESS",
+#                 "response_code": 200,
+#                 "duration_ms": duration
+#             })
+
+#             return jsonify(data), 200
+
+#         job_id = create_job(include_static=include_static)
+#         update_job_status(job_id, "RUNNING")
+
+#         run_pipeline_job({"id": job_id, "include_static": include_static})
+
+#         data = format_to_dataslayer(fetch_account_metrics())
+#         duration = int((time.time() - start_time) * 1000)
+
+#         log_to_db({
+#             # "request_id": g.request_id,
+#             "endpoint": "/get_results",
+#             "method": "GET",
+#             "query_params": request.args.to_dict(),
+#             "job_id": job_id,
+#             "status": "SUCCESS",
+#             "response_code": 200,
+#             "duration_ms": duration
+#         })
+
+#         return jsonify(data), 200
+
+#     except Exception as e:
+#         duration = int((time.time() - start_time) * 1000)
+
+#         log_to_db({
+#             # "request_id": g.request_id,
+#             "endpoint": "/get_results",
+#             "method": "GET",
+#             "query_params": request.args.to_dict(),
+#             "job_id": job_id,
+#             "status": "ERROR",
+#             "response_code": 500,
+#             "duration_ms": duration,
+#             "error_message": str(e)
+#         })
+
+#         return jsonify({"error": "Internal Server Error"}), 500
+    
 @pipeline_bp.route("/get_results/", defaults={"token": None}, methods=["GET"])
 @pipeline_bp.route("/get_results/<path:token>", methods=["GET"])
 def get_results(token):
@@ -84,22 +154,7 @@ def get_results(token):
     run_pipeline_job({"id": job_id, "include_static": include_static})
 
     return jsonify(format_to_dataslayer(fetch_account_metrics())), 200
-#  SELECT 
-#             a.name AS "Account name",
-#             a.ad_account_id AS "Account id",
-#             a.currency AS "Account Currency",
-#             b.balance AS "Balance",
-#             CASE WHEN b.account_status = 1 THEN 'ACTIVE' ELSE 'UNKNOWN' END AS "Account status",
-#             b.amount_spent AS "Account amount spent",
-#             'PS' AS "Business country code",
-#             COALESCE(SUM(i.results), 0) AS "Clicks",
-#             COALESCE(SUM(i.reach), 0) AS "Reach"
-#         FROM ad_accounts a
-#         LEFT JOIN billing b ON b.ad_account_id = a.ad_account_id
-#         LEFT JOIN adsets s ON s.ad_account_id = a.ad_account_id
-#         LEFT JOIN ads ad ON ad.adset_id = s.adset_id
-#         LEFT JOIN ad_daily_insights i ON i.ad_id = ad.ad_id AND i.date = CURDATE()
-#         GROUP BY a.ad_account_id
+
 def fetch_account_metrics():
     return query_dict(""" 
        SELECT 
@@ -163,7 +218,31 @@ def get_latest_completed_job(include_static=None):
     result = query_dict(query, params)
 
     return result[0] if result else None
+def log_to_db(data):
+    try:
+        query = """
+        INSERT INTO api_logs (
+             endpoint, method, query_params,
+            job_id, status, response_code, duration_ms, error_message
+        ) VALUES ( %s, %s, %s, %s, %s, %s, %s, %s)
+        """
 
+        values = (
+            data.get("request_id"),
+            data.get("endpoint"),
+            data.get("method"),
+            str(data.get("query_params")),
+            data.get("job_id"),
+            data.get("status"),
+            data.get("response_code"),
+            data.get("duration_ms"),
+            data.get("error_message")
+        )
+
+        execute(query, values)   # adapt to your DB connector
+
+    except Exception as e:
+        logger.error(f"DB logging failed: {str(e)}")
 def get_valid_job(include_static=None):
     query = """
         SELECT *
