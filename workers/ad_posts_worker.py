@@ -1,124 +1,145 @@
-# workers/ad_posts_worker.py
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from logs.logger import logger
-from db.db import query_dict
+from db.db import query_dict, execute
 from db.config_store import get_config
 from services.ad_posts_service import (
     _resolve_post,
     _fetch_creative_post_data,
     _find_post_by_story_id,
     _find_post_by_instagram_permalink,
-    _upsert_ad_post,
 )
 from integrations.meta_graph_client import MetaGraphClient
+from services.job_service import heartbeat
 
-# Reduced batch size to manage DB connections and memory better
-BATCH_SIZE = 500  
-LOG_EVERY = 100
-
-def _job(client: MetaGraphClient, row: dict) -> dict:
-    ad_id = int(row["ad_id"])
-    post_id_value = row.get("post_id")
-
+def _job(user_token: str, creative_id: str, ad_ids: list) -> dict:
+    """
+    Resolves ONE creative and applies the result to ALL ads using it.
+    """
+    client = MetaGraphClient(user_token)
     try:
-        # 1. Try to find post in DB using current ad data
-        post_row_id, link_type = _resolve_post(post_id_value)
+        # 1. Fetch creative data once
+        creative = _fetch_creative_post_data(client, creative_id)
+        if not creative:
+            return {"ok": False, "count": len(ad_ids)}
 
-        # 2. If not found, fetch creative from Meta API
-        if not post_row_id:
-            creative = _fetch_creative_post_data(client, ad_id)
+        post_row_id = None
+        link_type = None
 
-            if creative:
-                if creative.get("effective_story_id"):
-                    post_row_id = _find_post_by_story_id(creative["effective_story_id"])
-                    link_type = "facebook_story"
+        if creative.get("effective_story_id"):
+            post_row_id = _find_post_by_story_id(creative["effective_story_id"])
+            link_type = "facebook_story"
+        
+        if not post_row_id and creative.get("instagram_permalink"):
+            post_row_id = _find_post_by_instagram_permalink(creative["instagram_permalink"])
+            link_type = "instagram_permalink"
 
-                if not post_row_id and creative.get("instagram_permalink"):
-                    post_row_id = _find_post_by_instagram_permalink(creative["instagram_permalink"])
-                    link_type = "instagram_permalink"
-
-        # 3. Handle cases where no post is associated
-        if not post_row_id:
-            return {"ok": False, "type": "skipped", "ad_id": ad_id}
-
-        # 4. Save to DB
-        _upsert_ad_post(ad_id, post_row_id, link_type or "facebook_story")
-        return {"ok": True, "ad_id": ad_id}
+        if post_row_id:
+            # 2. Bulk Update all ads that share this creative
+            format_strings = ','.join(['%s'] * len(ad_ids))
+            execute(f"""
+                INSERT INTO ad_posts (ad_id, post_row_id, link_type)
+                SELECT ad_id, %s, %s FROM ads WHERE ad_id IN ({format_strings})
+                ON DUPLICATE KEY UPDATE 
+                    post_row_id = VALUES(post_row_id), 
+                    link_type = VALUES(link_type),
+                    updated_at = NOW()
+            """, (post_row_id, link_type, *ad_ids))
+            
+            return {"ok": True, "count": len(ad_ids)}
+        
+        return {"ok": False, "type": "skipped", "count": len(ad_ids)}
 
     except Exception as e:
-        logger.error(f"❌ ad_posts thread error ad_id={ad_id}: {e}")
-        return {"ok": False, "type": "failed", "ad_id": ad_id}
+        logger.error(f"❌ Creative {creative_id} failed: {e}")
+        return {"ok": False, "type": "error", "count": len(ad_ids)}
 
+def _batch_job(user_token: str, creative_batch: list, groups: dict):
+    client = MetaGraphClient(user_token)
+    # Join IDs with commas: "id1,id2,id3"
+    ids_str = ",".join(creative_batch)
+    
+    try:
+        # One API call for up to 50 creatives!
+        batch_data = client.get("", params={
+            "ids": ids_str, 
+            "fields": "id,effective_object_story_id,instagram_permalink_url"
+        })
+
+        if not batch_data: return 0
+
+        linked_count = 0
+        for cid, data in batch_data.items():
+            story_id = data.get("effective_object_story_id")
+            ig_url = data.get("instagram_permalink_url")
+            
+            post_row_id = None
+            link_type = None
+
+            if story_id:
+                post_row_id = _find_post_by_story_id(story_id)
+                link_type = "facebook_story"
+            
+            if not post_row_id and ig_url:
+                post_row_id = _find_post_by_instagram_permalink(ig_url)
+                link_type = "instagram_permalink"
+
+            if post_row_id:
+                ad_ids = groups[cid]
+                format_strings = ','.join(['%s'] * len(ad_ids))
+                execute(f"""
+                    INSERT INTO ad_posts (ad_id, post_row_id, link_type)
+                    SELECT ad_id, %s, %s FROM ads WHERE ad_id IN ({format_strings})
+                    ON DUPLICATE KEY UPDATE post_row_id=VALUES(post_row_id), link_type=VALUES(link_type), updated_at=NOW()
+                """, (post_row_id, link_type, *ad_ids))
+                linked_count += len(ad_ids)
+        
+        return linked_count
+    except Exception as e:
+        logger.error(f"❌ Batch failed: {e}")
+        return 0
 
 def run(job_id=None):
     user_token = get_config("META_USER_TOKEN")
-    if not user_token:
-        logger.error("❌ META_USER_TOKEN missing")
-        return {"ok": False, "error": "Missing Token"}
+    workers = 5 # Higher workers are safer now because we use batches
+    
+    ads_to_sync = query_dict("""
+        SELECT a.ad_id, a.creative_id
+        FROM ads a
+        LEFT JOIN ad_posts ap ON a.ad_id = ap.ad_id
+        WHERE ap.ad_id IS NULL AND a.creative_id IS NOT NULL
+    """)
 
-    workers = int(os.getenv("AD_POSTS_WORKERS", "5"))
-    ads = query_dict("SELECT ad_id, post_id FROM ads ORDER BY ad_id DESC")
-    total = len(ads)
+    if not ads_to_sync:
+        logger.info("✅ No ads to sync.")
+        return {"ok": True}
 
-    if not total:
-        logger.warning("No ads found for ad_posts")
-        return {"ok": True, "total": 0}
+    groups = {}
+    for row in ads_to_sync:
+        groups.setdefault(row['creative_id'], []).append(row['ad_id'])
 
-    logger.info(f"🚀 START ad_posts worker. Ads={total} Workers={workers}")
-    start_time = time.time()
-    client = MetaGraphClient(user_token)
+    creatives = list(groups.keys())
+    total_creatives = len(creatives)
+    
+    # Split creatives into batches of 50
+    batch_size = 50
+    batches = [creatives[i:i + batch_size] for i in range(0, len(creatives), batch_size)]
+    
+    logger.info(f"🚀 Processing {len(batches)} batches ({total_creatives} creatives).")
 
-    success, skipped, failed, processed = 0, 0, 0, 0
-
+    success_ads = 0
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        # Submit and process in smaller chunks to avoid "sticking"
-        for i in range(0, total, BATCH_SIZE):
-            batch = ads[i:i + BATCH_SIZE]
-            futures = [ex.submit(_job, client, row) for row in batch]
+        futures = [ex.submit(_batch_job, user_token, batch, groups) for batch in batches]
+        for i, f in enumerate(as_completed(futures)):
+            success_ads += f.result()
+            if i % 5 == 0:
+                logger.info(f"⏳ Progress: {round((i/len(batches))*100, 2)}% | Ads Linked: {success_ads}")
+                if job_id: heartbeat(job_id)
 
-            # Process this batch's results
-            for f in as_completed(futures):
-                try:
-                    # Timeout prevents one dead API call from hanging the whole app
-                    res = f.result(timeout=60) 
-                    processed += 1
+    return {"ok": True, "linked_ads": success_ads}
 
-                    if res.get("ok"):
-                        success += 1
-                    elif res.get("type") == "skipped":
-                        skipped += 1
-                    else:
-                        failed += 1
-                except Exception as e:
-                    processed += 1
-                    failed += 1
-                    logger.error(f"⚠️ Future completion error: {e}")
-
-                # Progress Reporting
-                if processed % LOG_EVERY == 0:
-                    logger.info(f"⏳ Progress: {processed}/{total} ({(processed/total)*100:.1f}%) | Success={success} Skipped={skipped}")
-
-            # Heartbeat for long-running jobs
-            if job_id:
-                try:
-                    from services.job_service import heartbeat
-                    heartbeat(job_id)
-                except: pass
-
-    elapsed = time.time() - start_time
-    result = {
-        "ok": True,
-        "total": total,
-        "success": success,
-        "skipped": skipped,
-        "failed": failed,
-        "elapsed_seconds": round(elapsed, 2),
-    }
-    logger.info(f"✅ ad_posts DONE: {result}")
-    return result
-
+    return {"ok": True, "linked_ads": success_ads}
 if __name__ == "__main__":
     run()

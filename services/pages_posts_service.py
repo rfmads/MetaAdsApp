@@ -280,7 +280,7 @@ def sync_instagram_posts_last_hours(
                 "thumbnail_url": m.get("thumbnail_url") or m.get("media_url"),
                 "created_time": created,
                 "platform": "instagram",
-                "effective_object_story_id": None,
+                "effective_object_story_id": str(m.get("id")),
                 "ig_media_id": str(m.get("id")),
                 "permalink_url": m.get("permalink"),
             })
