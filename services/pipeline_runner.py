@@ -25,8 +25,10 @@ def run_pipeline_job(job):
 
     if include_static is True:
         steps = [
-            ("ad_accounts", ad_accounts_worker.run),
-            ("pages", pages_worker.run),
+            # ("ad_accounts", ad_accounts_worker.run),
+            # ("pages", pages_worker.run),
+            ("ad_posts", ad_posts_worker.run),
+            ("page_ad_account", page_ad_account_worker.run),
         ]
     elif include_static is None:
         steps = [
