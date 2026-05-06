@@ -13,11 +13,37 @@ def _safe_str(v: Any) -> Optional[str]:
     return s if s else None
 
 def _find_post_by_story_id(story_id: str) -> Optional[int]:
+    if not story_id:
+        return None
+
+    # 1. Try exact match (e.g., "PageID_PostID")
     row = query_one(
         "SELECT id FROM posts WHERE effective_object_story_id = %s and effective_object_story_id IS NOT NULL LIMIT 1",
         (story_id,),
     )
-    return int(row["id"]) if row and row.get("id") else None
+    if row:
+        return int(row["id"])
+
+    # 2. If story_id contains an underscore, try matching just the second part
+    if "_" in story_id:
+        post_id_only = story_id.split("_")[0]
+        row = query_one(
+            "SELECT id FROM posts WHERE effective_object_story_id = %s and effective_object_story_id IS NOT NULL LIMIT 1",
+            (post_id_only,),
+        )
+        if row:
+            return int(row["id"])
+
+    # 3. If story_id is just a number, try a LIKE match to find the PageID_ version
+    else:
+        row = query_one(
+            "SELECT id FROM posts WHERE effective_object_story_id LIKE %s and effective_object_story_id IS NOT NULL LIMIT 1",
+            (f"%_{story_id}",),
+        )
+        if row:
+            return int(row["id"])
+
+    return None
 
 def _find_post_by_instagram_permalink(url: str) -> Optional[int]:
     row = query_one(
