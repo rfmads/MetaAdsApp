@@ -195,6 +195,56 @@ FB_FIELDS = "id,message,created_time,permalink_url,attachments{media_type,media,
 #         logger.error(f"❌ FB posts sync failed page={page_id}: {e}")
 #         return {"saved": saved, "skipped_old": skipped_old, "error": str(e)}
 
+# Add this to services/pages_posts_service.py
+
+def sync_facebook_ads_posts(client, page_id: int, hours: int = 24,  limit: int = 100) -> Dict[str, int]:
+    """
+    Fetch 'Unpublished' or 'Dark' posts used in ads.
+    Endpoint: /{page_id}/ads_posts
+    """
+    since_ts = int((datetime.now(timezone.utc) - timedelta(hours=hours)).timestamp())
+    saved = 0
+    logger.info(f"🟠 FB Dark Posts (ads_posts) sync page={page_id}")
+
+    try:
+        # Note: ads_posts contains the 'Dark Posts' that aren't on the timeline
+        params = {
+            "fields": "id,message,created_time,permalink_url,attachments{media_type,media}",
+            "limit": limit,
+            "include_inline_create": "true",
+            "since": since_ts  # Important for dynamic ads
+        }
+
+        for post in client.get_paged(f"{page_id}/ads_posts", params=params):
+            created = _parse_iso_dt(post.get("created_time"))
+            
+            # Extract Media logic (same as your existing function)
+            media_type, thumbnail_url = None, None
+            att = (post.get("attachments") or {}).get("data") or []
+            if att:
+                media_type = _normalize_media_type(att[0].get("media_type"))
+                media = att[0].get("media") or {}
+                thumbnail_url = (media.get("image") or {}).get("src") if isinstance(media, dict) else None
+
+            upsert_post({
+                "page_id": int(page_id),
+                "post_id": str(post.get("id")),
+                "media_type": media_type,
+                "thumbnail_url": thumbnail_url,
+                "created_time": created,
+                "platform": "facebook",
+                "permalink_url": post.get("permalink_url"),
+                "instagram_permalink_url": None,
+                "effective_object_story_id": str(post.get("id")),
+                "ig_media_id": None,
+            })
+            saved += 1
+            
+        logger.info(f"✅ FB Dark Posts synced for {page_id} saved={saved}")
+        return {"saved": saved}
+    except Exception as e:
+        logger.error(f"❌ FB Dark Posts failed {page_id}: {e}")
+        raise e
 def sync_facebook_posts_last_hours(
     client, 
     page_id: int, 

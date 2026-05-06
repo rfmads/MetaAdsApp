@@ -6,6 +6,7 @@ from db.db import query_dict
 from integrations.meta_graph_client import MetaGraphClient
 from services.job_service import heartbeat
 from services.pages_posts_service import (
+    sync_facebook_ads_posts,
     sync_facebook_posts_last_hours,
     sync_instagram_posts_last_hours,
 )
@@ -30,7 +31,10 @@ def _job(user_token: str, page: dict, hours: int) -> dict:
         out["fb"] = r1
     except Exception as e:
         out["errors"].append(f"FB Error: {str(e)}")
-
+    try:
+        out["ads_posts"] = sync_facebook_ads_posts(client, page_id, hours=hours, limit=100)
+    except Exception as e:
+        out["errors"].append(f"Ads Posts Error: {str(e)}")
     # Instagram posts
     if ig_user_id:
         try:

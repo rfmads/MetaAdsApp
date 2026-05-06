@@ -13,10 +13,11 @@ def _safe_str(v: Any) -> Optional[str]:
     return s if s else None
 
 def _find_post_by_story_id(story_id: str) -> Optional[int]:
+    logger.warning(f"({story_id}): Story ID is empty or None")
     if not story_id:
         return None
-
-    # 1. Try exact match (e.g., "PageID_PostID")
+     
+    # 1. Try exact match (e.g., "12345_678910")
     row = query_one(
         "SELECT id FROM posts WHERE effective_object_story_id = %s and effective_object_story_id IS NOT NULL LIMIT 1",
         (story_id,),
@@ -24,27 +25,27 @@ def _find_post_by_story_id(story_id: str) -> Optional[int]:
     if row:
         return int(row["id"])
 
-    # 2. If story_id contains an underscore, try matching just the second part
+    # 2. Try the second part (The actual Post ID)
     if "_" in story_id:
-        post_id_only = story_id.split("_")[0]
-        row = query_one(
-            "SELECT id FROM posts WHERE effective_object_story_id = %s and effective_object_story_id IS NOT NULL LIMIT 1",
-            (post_id_only,),
-        )
-        if row:
-            return int(row["id"])
+        parts = story_id.split("_")
+        if len(parts) > 1:
+            post_id_only = parts[1] # ✅ FIXED: Get the second part
+            row = query_one(
+                "SELECT id FROM posts WHERE effective_object_story_id = %s and effective_object_story_id IS NOT NULL LIMIT 1",
+                (post_id_only,),
+            )
+            if row:
+                return int(row["id"])
 
-    # 3. If story_id is just a number, try a LIKE match to find the PageID_ version
-    else:
-        row = query_one(
-            "SELECT id FROM posts WHERE effective_object_story_id LIKE %s and effective_object_story_id IS NOT NULL LIMIT 1",
-            (f"%_{story_id}",),
-        )
-        if row:
-            return int(row["id"])
+    # 3. Try a LIKE match (in case DB has PageID_PostID but Meta sent just PostID)
+    row = query_one(
+        "SELECT id FROM posts WHERE effective_object_story_id LIKE %s and effective_object_story_id IS NOT NULL LIMIT 1",
+        (f"%_{story_id}",),
+    )
+    if row:
+        return int(row["id"])
 
     return None
-
 def _find_post_by_instagram_permalink(url: str) -> Optional[int]:
     row = query_one(
         "SELECT id FROM posts WHERE instagram_permalink_url = %s and instagram_permalink_url IS NOT NULL LIMIT 1",
