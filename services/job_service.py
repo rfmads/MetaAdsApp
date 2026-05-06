@@ -76,3 +76,14 @@ def log_step(job_id, step, status, message=""):
     })
 def heartbeat(job_id):
     execute("UPDATE pipeline_jobs SET updated_at = NOW() WHERE id = %s", (job_id,))    
+
+def log_error(job_id, step, ad_account_id, error_message):
+    execute("""
+        INSERT INTO pipeline_job_logs
+        (job_id, step_name, status, message)
+        VALUES (%s, %s, 'FAILED', %s)
+    """, (
+        job_id,
+        f"{step}:act_{ad_account_id}",
+        error_message
+    ))    
