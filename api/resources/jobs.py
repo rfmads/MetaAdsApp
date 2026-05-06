@@ -1,5 +1,8 @@
+from threading import Thread
 from flask import Blueprint, request, jsonify
 from db.db import query_dict, execute
+from services.job_service import create_job, get_running_job, update_job_status
+from services.pipeline_runner import run_pipeline_job
 
 # Standard Flask Blueprint
 jobs_bp = Blueprint("jobs", __name__, url_prefix="/api")
@@ -46,45 +49,6 @@ def get_job():
         "logs": logs
     })
 
-# @jobs_bp.route("/get_results", methods=["GET"])
-# def get_results():
-#     job_id = request.args.get("job_id")
-
-#     if not job_id:
-#         return jsonify({
-#             "error": {
-#                 "message": "job_id is required"
-#             }
-#         }), 400
-
-#     job_data = query_dict(
-#         "SELECT * FROM pipeline_jobs WHERE id=%s",
-#         (job_id,)
-#     )
-
-#     if not job_data:
-#         return jsonify({
-#             "error": {
-#                 "message": "Job not found"
-#             }
-#         }), 404
-
-#     job = job_data[0]
-
-#     # ⏳ Still running
-#     if job["status"] != "COMPLETED":
-#         return jsonify({
-#             "status": job["status"]
-#         }), 202
-
-#     # ✅ THIS IS THE MOST IMPORTANT PART
-#     results = query_dict(
-#         "SELECT * FROM pipeline_results WHERE job_id=%s",
-#         (job_id,)
-#     )
-
-#     # 🚨 Return RAW DATA ONLY (no wrapper)
-#     return jsonify(results), 200
 # =========================
 # JOB HEALTH
 # =========================
@@ -119,87 +83,60 @@ def cleanup():
         "message": "cleanup done"
     })
 
-# from flask_smorest import Blueprint
-# from db.db import query_dict, execute
-# from api.schemas.common import JobQuerySchema
+# =========================
+# STOP JOB
+# =========================
+@jobs_bp.route("/stop-job", methods=["GET"])
+def stop_job():
+    # 2. Manual extraction of job_id
+    job_id = request.args.get("job_id")
 
-# blp = Blueprint(
-#     "jobs",
-#     "jobs",
-#     url_prefix="/api",
-#     description="Jobs APIs"
-# )
+    if not job_id:
+        running = get_running_job()
+        if not running:
+            return jsonify({"message": "No active job"}), 404
+        job_id = running["id"]
 
-# # =========================
-# # GET JOB (WITH INPUT)
-# # =========================
-# @blp.route("/job")
-# @blp.arguments(JobQuerySchema, location="query")
-# def get_job(args):
+    update_job_status(job_id, "STOPPED")
 
-#     job_id = args.get("job_id")
+    return jsonify({
+        "status": "success",
+        "job_id": job_id
+    })
 
-#     if job_id:
-#         job = query_dict(
-#             "SELECT * FROM pipeline_jobs WHERE id=%s",
-#             (job_id,)
-#         )
+# =========================
+# RUN Job
+# =========================
+@jobs_bp.route("/run-job", methods=["GET"])
+def run_pipeline():
+    include_static_raw = request.args.get("include_static")
+    include_static = None
+    if include_static_raw is not None:
+        include_static = include_static_raw.lower() == "true"
 
-#         if not job:
-#             return {"message": "Job not found"}, 404
+    running_job = get_running_job()
+    if running_job:
+        return jsonify({
+            "error": {
+                "message": "Another job is already running",
+                "code": 409
+            }
+        }), 409
 
-#         job = job[0]
-#     else:
-#         job = query_dict("""
-#             SELECT * FROM pipeline_jobs
-#             ORDER BY created_at DESC
-#             LIMIT 1
-#         """)[0]
+    job_id = create_job(include_static=include_static)
+    update_job_status(job_id, "RUNNING")
 
-#         job_id = job["id"]
+    job = {
+        "id": job_id,
+        "include_static": include_static
+    }
 
-#     logs = query_dict(
-#         "SELECT * FROM pipeline_job_logs WHERE job_id=%s ORDER BY id",
-#         (job_id,)
-#     )
+    Thread(
+        target=run_pipeline_job,
+        args=(job,),
+        daemon=True
+    ).start()
 
-#     return {
-#         "job": job,
-#         "logs": logs
-#     }
-
-# # =========================
-# # JOB HEALTH (NO INPUT)
-# # =========================
-# @blp.route("/job-health")
-# def job_health():
-
-#     stuck = query_dict("""
-#         SELECT id, status, updated_at
-#         FROM pipeline_jobs
-#         WHERE status='RUNNING'
-#         AND updated_at < NOW() - INTERVAL 15 MINUTE
-#     """)
-
-#     return {
-#         "status": "warning" if stuck else "healthy",
-#         "stuck_jobs": stuck
-#     }
-
-# # =========================
-# # CLEANUP (NO INPUT)
-# # =========================
-# @blp.route("/cleanup-stuck-jobs")
-# def cleanup():
-
-#     execute("""
-#         UPDATE pipeline_jobs
-#         SET status='FAILED',
-#             error_message='Timeout'
-#         WHERE status='RUNNING'
-#         AND updated_at < NOW() - INTERVAL 20 MINUTE
-#     """)
-
-#     return {
-#         "message": "cleanup done"
-#     }
+    return jsonify({
+        "job_id": job_id
+    }), 202

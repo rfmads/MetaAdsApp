@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify
-from api.health_service import get_health_status 
+from datetime import datetime
+from db.db import query_dict
 
 # 1. Create a standard Flask Blueprint
 # We can set the url_prefix here to match your previous logic
@@ -12,20 +13,31 @@ def health():
     # 3. Use jsonify for the response
     return jsonify(get_health_status())
 
+def get_health_status():
+    try:
+        query_dict("SELECT 1")
 
-# from flask_smorest import Blueprint
-# from flask import jsonify
+        running_job = query_dict("""
+            SELECT id, started_at
+            FROM pipeline_jobs
+            WHERE status = 'RUNNING'
+            ORDER BY started_at DESC
+            LIMIT 1
+        """)
 
-# from api.health_service import get_health_status
+        return {
+            "status": "ok",
+            "time": datetime.utcnow().isoformat(),
+            "database": "connected",
+            "pipeline": {
+                "running": bool(running_job),
+                "job_id": running_job[0]["id"] if running_job else None
+            }
+        }
 
-# blp = Blueprint(
-#     "health",
-#     "health",
-#     url_prefix="/health",
-#     description="System Health"
-# )
-
-
-# @blp.route("/", methods=["GET"])
-# def health():
-#     return jsonify(get_health_status())
+    except Exception as e:
+        return {
+            "status": "error",
+            "time": datetime.utcnow().isoformat(),
+            "error": str(e)
+        }

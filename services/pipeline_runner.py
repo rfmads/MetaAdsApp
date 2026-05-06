@@ -4,6 +4,8 @@ from logs.logger import logger
 
 from workers import (
     ad_accounts_worker,
+    page_ad_account_worker,
+    ad_posts_worker,
     pages_worker,
     entities_worker,
     posts_worker,
@@ -38,6 +40,8 @@ def run_pipeline_job(job):
             ("creatives", creative_worker.run),
             ("insights", insights_worker.run),
             ("billing", billing_worker.run),
+            ("ad_posts", ad_posts_worker.run),
+            ("page_ad_account", page_ad_account_worker.run),
         ]
     else:  # include_static is False
         steps = [
@@ -46,6 +50,8 @@ def run_pipeline_job(job):
             ("creatives", creative_worker.run),
             ("insights", insights_worker.run),
             ("billing", billing_worker.run),
+            ("ad_posts", ad_posts_worker.run),
+            ("page_ad_account", page_ad_account_worker.run),
         ]
 
     # 2. Execution Engine
@@ -101,80 +107,3 @@ def run_pipeline_job(job):
                     retries=retries+1
                 WHERE id=%s
             """, (job_id,))
-            
-# def run_pipeline_job(job):
-#     job_id = job["id"]
-#     include_static = job.get("include_static")
-
-#     update_job_status(job_id, "RUNNING")
-
-#     steps = []
-
-#     # =========================
-#     # CASE 1: ONLY STATIC
-#     # =========================
-#     if include_static is True:
-#         steps = [
-#             ("ad_accounts", ad_accounts_worker.run),
-#             ("pages", pages_worker.run),
-#         ]
-
-#     # =========================
-#     # CASE 2: FULL PIPELINE
-#     # include_static is None
-#     # =========================
-#     elif include_static is None:
-#         steps = [
-#             ("ad_accounts", ad_accounts_worker.run),
-#             ("pages", pages_worker.run),
-#             ("entities", entities_worker.run),
-#             ("posts", posts_worker.run),
-#             ("creatives", creative_worker.run),
-#             ("insights", insights_worker.run),
-#             ("billing", billing_worker.run),
-#         ]
-
-#     # =========================
-#     # CASE 3: EVERYTHING EXCEPT STATIC
-#     # include_static is False
-#     # =========================
-#     else:
-#         steps = [
-#             ("entities", entities_worker.run),
-#             ("posts", posts_worker.run),
-#             ("creatives", creative_worker.run),
-#             ("insights", insights_worker.run),
-#             ("billing", billing_worker.run),
-#         ]
-
-#     # =========================
-#     # EXECUTION ENGINE
-#     # =========================
-#     try:
-#         for name, func in steps:
-#             log_step(job_id, name, "START", "started")
-
-#             start = datetime.now()
-#             result = func()
-
-#             log_step(job_id, name, "SUCCESS", str(result))
-
-#             logger.info(f"✅ {name} done in {(datetime.now() - start).seconds}s")
-
-#         update_job_status(job_id, "SUCCESS")
-
-#     except Exception as e:
-#         logger.error(f"❌ pipeline failed: {e}")
-
-#         update_job_status(job_id, "FAILED", str(e))
-
-#         log_step(job_id, name, "FAILED", str(e))
-
-#         # retry logic
-#         if job.get("retries", 0) < job.get("max_retries", 3):
-#             execute("""
-#                 UPDATE pipeline_jobs
-#                 SET status='PENDING',
-#                     retries=retries+1
-#                 WHERE id=%s
-#             """, (job_id,))
