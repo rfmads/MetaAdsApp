@@ -8,80 +8,59 @@ from db.db import execute, query_dict
 from db.config_store import get_config
 
 def format_posts_to_dataslayer(rows):
+    # Exact headers from your old API requirement
     headers = [
-        "Page name",
-        "Page ID",
-        "Date",
-        "Post ID",
-        "Video ID",
-        "Video description",
-        "Link to post",
-        "Video source URL",
-        "Video embed HTML",
-        "Video image URL",
-        "Post image URL",
-        "Post image",
-        "Post type",
-        "Post name",
-        "Post story",
-        "Post description",
-        "Post shared link",
-        "Post object ID",
-        "Post thumbnail URL",
-        "Universal video ID",
-        "Video title",
-        "Video permalink URL"
+        "User ID", "Username", "Name", "User image URL", "Date", 
+        "Media ID", "Media permalink", "Media type", "Media created date", 
+        "Media Product type", "Media shortcode", "Media URL", "Media Image", 
+        "Media thumbnail URL (Video only)", "Media thumbnail", "Media caption"
     ]
 
     data = [headers]
 
     for r in rows:
+        # Extracting variables for cleaner list construction
+        media_url = r.get("media_url", "")
+        thumb_url = r.get("media_thumbnail_url", "")
+        
         data.append([
-            r.get("page_name"),
-            str(r.get("page_id")),
-            str(r.get("date")),
-            r.get("post_id"),
-
-            r.get("video_id"),
-            r.get("video_description"),
-
-            r.get("link_to_post"),
-
-            r.get("video_source_url"),
-            r.get("video_embed_html"),
-            r.get("video_image_url"),
-
-            r.get("post_image_url"),
-            r.get("post_image"),
-
-            r.get("post_type"),
-
-            r.get("post_name"),
-            r.get("post_story"),
-            r.get("post_description"),
-
-            r.get("post_shared_link"),
-            r.get("post_object_id"),
-            r.get("post_thumbnail_url"),
-
-            r.get("universal_video_id"),
-            r.get("video_title"),
-            r.get("video_permalink_url"),
+            str(r.get("user_id", "")),
+            r.get("username", ""),
+            r.get("name", ""),
+            r.get("user_image_url", ""),
+            str(r.get("date", "")),
+            str(r.get("media_id", "")),
+            r.get("media_permalink", ""),
+            r.get("media_type", ""),
+            str(r.get("media_created_date", "")),
+            r.get("media_product_type", ""),
+            r.get("media_shortcode", ""),
+            media_url,
+            f'=IMAGE("{media_url}")' if media_url else "",
+            thumb_url,
+            f'=IMAGE("{thumb_url}")' if thumb_url else "",
+            r.get("media_caption", "")
         ])
 
     return {"result": data}
 # ca.link_url
 def fetch_instagram_insights():
     return query_dict(""" 
-     SELECT 
-    p.page_name,
-    p.page_id,
+  SELECT 
+    p.ig_user_id AS user_id,
+    p.ig_username AS username,      -- Ensure this column exists in your pages table
+    p.page_name AS name,
+   null AS user_image_url,
     po.created_time AS date,
-    po.post_id,
-    ca.body AS video_description,
-    po.permalink_url AS link_to_post,
-    COALESCE(ca.link_url, po.thumbnail_url) AS video_source_url, -- Fallback if creative link is missing
-    po.media_type AS post_type
+    po.post_id AS media_id,
+    po.permalink_url AS media_permalink,
+    po.media_type AS media_type,           -- e.g., VIDEO, IMAGE, CAROUSEL_ALBUM
+    po.created_time AS media_created_date,
+    po.media_type AS media_product_type,   -- Often REELS or FEED
+    SUBSTRING_INDEX(REPLACE(po.permalink_url, 'https://www.instagram.com/reel/', ''), '/', 1) AS media_shortcode,
+    COALESCE(ca.link_url, po.thumbnail_url) AS media_url,
+    po.thumbnail_url AS media_thumbnail_url,
+    ca.body AS media_caption
 FROM
     posts po
     JOIN pages p ON p.page_id = po.page_id
@@ -90,8 +69,7 @@ FROM
     LEFT JOIN creative_ads ca ON ca.creative_id = a.creative_id
 WHERE
     po.created_time >= NOW() - INTERVAL 1 DAY
-    AND po.platform IN ('instagram') 
-   -- AND (ca.video_id IS NOT NULL OR po.media_type IN ('VIDEO', 'REELS'))
-ORDER BY po.created_time DESC;
+    AND po.platform = 'instagram'
+ORDER BY po.created_time DESC
 
     """)
