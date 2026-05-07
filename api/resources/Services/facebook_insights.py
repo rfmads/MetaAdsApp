@@ -7,6 +7,11 @@ from threading import Thread
 from db.db import execute, query_dict
 from db.config_store import get_config
 
+def safe_str(v):
+    if v is None:
+        return "--"
+    return str(v)
+
 def format_posts_to_dataslayer(rows):
     headers = [
         "Page name",
@@ -37,36 +42,36 @@ def format_posts_to_dataslayer(rows):
 
     for r in rows:
         data.append([
-            r.get("page_name"),
-            str(r.get("page_id")),
-            str(r.get("date")),
-            r.get("post_id"),
+            safe_str(r.get("page_name")),
+            safe_str(r.get("page_id")),
+            safe_str(r.get("date")),
+            safe_str(r.get("post_id")),
 
-            r.get("video_id"),
-            r.get("video_description"),
+            safe_str(r.get("video_id")),
+            safe_str(r.get("video_description")),
 
-            r.get("link_to_post"),
+            safe_str(r.get("link_to_post")),
 
-            r.get("video_source_url"),
-            r.get("video_embed_html"),
-            r.get("video_image_url"),
+            safe_str(r.get("video_source_url")),
+            safe_str(r.get("video_embed_html")),
+            safe_str(r.get("video_image_url")),
 
-            r.get("post_image_url"),
-            r.get("post_image"),
+            safe_str(r.get("post_image_url")),
+            safe_str(r.get("post_image")),
 
-            r.get("post_type"),
+            safe_str(r.get("post_type")),
 
-            r.get("post_name"),
-            r.get("post_story"),
-            r.get("post_description"),
+            safe_str(r.get("post_name")),
+            safe_str(r.get("post_story")),
+            safe_str(r.get("post_description")),
 
-            r.get("post_shared_link"),
-            r.get("post_object_id"),
-            r.get("post_thumbnail_url"),
+            safe_str(r.get("post_shared_link")),
+            safe_str(r.get("post_object_id")),
+            safe_str(r.get("post_thumbnail_url")),
 
-            r.get("universal_video_id"),
-            r.get("video_title"),
-            r.get("video_permalink_url"),
+            safe_str(r.get("universal_video_id")),
+            safe_str(r.get("video_title")),
+            safe_str(r.get("video_permalink_url")),
         ])
 
     return {"result": data}
