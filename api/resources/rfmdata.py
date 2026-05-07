@@ -2,7 +2,7 @@ from threading import Thread
 from flask import Blueprint, request, jsonify
 from api.resources.Services.facebook_ads import fetch_account_metrics, format_to_dataslayer
 from api.resources.Services.facebook_insights import format_posts_to_dataslayer, fetch_facebook_insights
-from api.resources.Services.instagram_ads import fetch_instagram_insights
+from api.resources.Services.instagram_ads import fetch_instagram_insights, format_instagram_to_dataslayer
 from db.db import query_dict, execute
 from services.job_service import create_job, get_running_job, update_job_status
 from services.pipeline_runner import run_pipeline_job
@@ -64,5 +64,5 @@ def get_facebook_insights_videos(token):
 @rfmdata.route("/get_instagram_insights/<path:token>", methods=["GET"])
 def get_instagram_insights(token):
     include_static = request.args.get("include_static", "false").lower() == "true"
-    data = format_posts_to_dataslayer(fetch_instagram_insights())
+    data = format_instagram_to_dataslayer(fetch_instagram_insights())
     return jsonify(data), 200

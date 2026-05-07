@@ -7,7 +7,7 @@ from threading import Thread
 from db.db import execute, query_dict
 from db.config_store import get_config
 
-def format_posts_to_dataslayer(rows):
+def format_instagram_to_dataslayer(rows):
     headers = [
         "User ID", "Username", "Name", "User image URL", "Date", 
         "Media ID", "Media permalink", "Media type", "Media created date", 
