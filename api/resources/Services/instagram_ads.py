@@ -71,7 +71,7 @@ def format_posts_to_dataslayer(rows):
 
     return {"result": data}
 
-def fetch_facebook_insights():
+def fetch_instagram_insights():
     return query_dict(""" 
       SELECT 
     p.page_name AS page_name,
@@ -108,7 +108,7 @@ FROM
     creative_ads ca ON ca.creative_id = a.creative_id
 WHERE
     po.created_time >= NOW() - INTERVAL 30 DAY
-        AND po.platform = 'facebook'
+        AND po.platform = 'instagram'
         AND a.status = 'ACTIVE'
         AND a.effective_status = 'ACTIVE'
 
