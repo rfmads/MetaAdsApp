@@ -4,7 +4,6 @@ from api.resources.Services.facebook_ads import fetch_account_metrics, format_to
 from api.resources.Services.facebook_insights import format_posts_to_dataslayer, fetch_facebook_insights
 from api.resources.Services.instagram_ads import fetch_instagram_insights
 from db.db import query_dict, execute
-from logs import logger
 from services.job_service import create_job, get_running_job, update_job_status
 from services.pipeline_runner import run_pipeline_job
 
@@ -37,9 +36,6 @@ def get_facebook_metrics(token):
             daemon=True
         ).start()
         
-        logger.info(f"🚀 No job was active. Started new background job ID: {job_id}")
-    else:
-        logger.info(f"🔄 Job {running_job['id']} is already running. Skipping trigger.")
 
     # 4. IMMEDIATELY return existing data
     # We do NOT wait for the thread. We return what is currently in the DB.
@@ -48,7 +44,6 @@ def get_facebook_metrics(token):
         data = format_to_dataslayer(raw_data)
         return jsonify(data), 200
     except Exception as e:
-        logger.error(f"❌ Error fetching existing metrics: {e}")
         return jsonify({"error": "Failed to fetch existing data", "details": str(e)}), 500
     
 @rfmdata.route("/get_facebook_insights/", defaults={"token": None}, methods=["GET"])

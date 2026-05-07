@@ -70,7 +70,7 @@ def format_posts_to_dataslayer(rows):
         ])
 
     return {"result": data}
-
+# link_url
 def fetch_instagram_insights():
     return query_dict(""" 
       SELECT 
@@ -81,7 +81,7 @@ def fetch_instagram_insights():
     ca.video_id AS video_id,
     ca.body AS video_description,
     po.permalink_url AS link_to_post,
-    ca.link_url AS video_source_url,
+    ca.permalink_url AS video_source_url,
     ca.instagram_permalink_url AS video_embed_html,
     ca.thumbnail_url AS video_image_url,
     po.thumbnail_url AS post_image_url,
