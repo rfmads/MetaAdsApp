@@ -8,7 +8,6 @@ from db.db import execute, query_dict
 from db.config_store import get_config
 
 def format_posts_to_dataslayer(rows):
-    # Exact headers from your old API requirement
     headers = [
         "User ID", "Username", "Name", "User image URL", "Date", 
         "Media ID", "Media permalink", "Media type", "Media created date", 
@@ -19,30 +18,27 @@ def format_posts_to_dataslayer(rows):
     data = [headers]
 
     for r in rows:
-        # Extracting variables for cleaner list construction
-        media_url = r.get("media_url", "")
-        thumb_url = r.get("media_thumbnail_url", "")
-        
         data.append([
-            str(r.get("user_id", "")),
-            r.get("username", ""),
-            r.get("name", ""),
-            r.get("user_image_url", ""),
-            str(r.get("date", "")),
-            str(r.get("media_id", "")),
-            r.get("media_permalink", ""),
-            r.get("media_type", ""),
-            str(r.get("media_created_date", "")),
-            r.get("media_product_type", ""),
-            r.get("media_shortcode", ""),
-            media_url,
-            f'=IMAGE("{media_url}")' if media_url else "",
-            thumb_url,
-            f'=IMAGE("{thumb_url}")' if thumb_url else "",
-            r.get("media_caption", "")
+            r.get("user_id"),
+            r.get("username"),
+            r.get("name"),
+            r.get("user_image_url"),
+            str(r.get("date")),
+            r.get("media_id"),
+            r.get("media_permalink"),
+            r.get("media_type"),
+            str(r.get("media_created_date")),
+            r.get("media_product_type"),
+            r.get("media_shortcode"),
+            r.get("media_url"),
+            r.get("media_image"),
+            r.get("media_thumbnail_url"),
+            r.get("media_thumbnail"),
+            r.get("media_caption")
         ])
 
     return {"result": data}
+
 # ca.link_url
 def fetch_instagram_insights():
     return query_dict(""" 
