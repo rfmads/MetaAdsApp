@@ -108,8 +108,8 @@ FROM
     creative_ads ca ON ca.creative_id = a.creative_id
 WHERE
     po.created_time >= NOW() - INTERVAL 30 DAY
+        AND ca.video_id IS NOT NULL
         AND po.platform = 'facebook'
-        AND a.status = 'ACTIVE'
-        AND a.effective_status = 'ACTIVE'
+ AND po.created_time >= CURDATE() - INTERVAL 1 DAY
 
     """)

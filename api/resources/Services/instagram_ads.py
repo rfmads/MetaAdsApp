@@ -70,46 +70,28 @@ def format_posts_to_dataslayer(rows):
         ])
 
     return {"result": data}
-# link_url
+# ca.link_url
 def fetch_instagram_insights():
     return query_dict(""" 
-      SELECT 
-    p.page_name AS page_name,
-    p.page_id AS page_id,
+     SELECT 
+    p.page_name,
+    p.page_id,
     po.created_time AS date,
-    po.post_id AS post_id,
-    ca.video_id AS video_id,
+    po.post_id,
     ca.body AS video_description,
     po.permalink_url AS link_to_post,
-    ca.permalink_url AS video_source_url,
-    ca.instagram_permalink_url AS video_embed_html,
-    ca.thumbnail_url AS video_image_url,
-    po.thumbnail_url AS post_image_url,
-    po.thumbnail_url AS post_image,
-    po.media_type AS post_type,
-    ca.name AS post_name,
-    ca.body AS post_story,
-    ca.body AS post_description,
-    po.permalink_url AS post_shared_link,
-    po.effective_object_story_id AS post_object_id,
-    po.thumbnail_url AS post_thumbnail_url,
-    ca.video_id AS universal_video_id,
-    ca.name AS video_title,
-    po.permalink_url AS video_permalink_url
+    COALESCE(ca.link_url, po.thumbnail_url) AS video_source_url, -- Fallback if creative link is missing
+    po.media_type AS post_type
 FROM
     posts po
-        JOIN
-    pages p ON p.page_id = po.page_id
-        LEFT JOIN
-    ad_posts ap ON ap.post_row_id = po.id
-        LEFT JOIN
-    ads a ON a.ad_id = ap.ad_id
-        LEFT JOIN
-    creative_ads ca ON ca.creative_id = a.creative_id
+    JOIN pages p ON p.page_id = po.page_id
+    LEFT JOIN ad_posts ap ON ap.post_row_id = po.id
+    LEFT JOIN ads a ON a.ad_id = ap.ad_id
+    LEFT JOIN creative_ads ca ON ca.creative_id = a.creative_id
 WHERE
-    po.created_time >= NOW() - INTERVAL 30 DAY
-        AND po.platform = 'instagram'
-        AND a.status = 'ACTIVE'
-        AND a.effective_status = 'ACTIVE'
+    po.created_time >= NOW() - INTERVAL 1 DAY
+    AND po.platform IN ('instagram') 
+   -- AND (ca.video_id IS NOT NULL OR po.media_type IN ('VIDEO', 'REELS'))
+ORDER BY po.created_time DESC;
 
     """)
