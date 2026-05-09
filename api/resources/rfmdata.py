@@ -4,7 +4,7 @@ from api.resources.Services.facebook_ads import fetch_account_metrics, format_to
 from api.resources.Services.facebook_insights import format_posts_to_dataslayer, fetch_facebook_insights
 from api.resources.Services.instagram_ads import fetch_instagram_insights, format_instagram_to_dataslayer
 from db.db import query_dict, execute
-from services.job_service import create_job, get_running_job, update_job_status
+from services.job_service import cleanup_stuck_jobs, create_job, get_running_job, update_job_status
 from services.pipeline_runner import run_pipeline_job
 
 # Standard Flask Blueprint
@@ -15,7 +15,8 @@ rfmdata = Blueprint("rfmdata", __name__, url_prefix="/api")
 def get_facebook_metrics(token):
     # 1. Parse arguments
     include_static = None
-
+    # 1. Cleanup stuck jobs before starting a new one. This ensures we don't have "RUNNING" jobs that are actually stuck due to crashes or timeouts.
+    cleanup_stuck_jobs()
     # 2. Check for an existing running job
     running_job = get_running_job()
 

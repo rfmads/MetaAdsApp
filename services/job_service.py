@@ -64,6 +64,16 @@ def get_running_job():
     """)
     return rows[0] if rows else None
 
+def cleanup_stuck_jobs():
+    execute("""
+        UPDATE pipeline_jobs
+        SET status='FAILED',
+            error_message='Timeout'
+        WHERE status='RUNNING'
+        AND updated_at < NOW() - INTERVAL 60 MINUTE
+    """)
+
+
 def log_step(job_id, step, status, message=""):
     execute("""
         INSERT INTO pipeline_job_logs (job_id, step_name, status, message)
