@@ -115,6 +115,6 @@ WHERE
     po.created_time >= NOW() - INTERVAL 30 DAY
         AND ca.video_id IS NOT NULL
         AND po.platform = 'facebook'
- AND po.created_time >= CURDATE() - INTERVAL 2 DAY
+ AND po.created_time >= CURDATE() - INTERVAL 5 DAY
 
     """)

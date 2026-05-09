@@ -73,7 +73,7 @@ JOIN pages p ON p.page_id = po.page_id
 LEFT JOIN ad_posts ap ON ap.post_row_id = po.id
 LEFT JOIN ads a ON a.ad_id = ap.ad_id
 LEFT JOIN creative_ads ca ON ca.creative_id = a.creative_id
-WHERE po.created_time >= NOW() - INTERVAL 3 DAY
+WHERE po.created_time >= NOW() - INTERVAL 5 DAY
     AND po.platform = 'instagram'
 ORDER BY po.created_time DESC
 
