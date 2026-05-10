@@ -76,27 +76,80 @@ def upsert_campaign(record: dict) -> None:
     """
     execute(sql, record)
 
+# def upsert_campaigns_batch(records: list[dict]) -> None:
+#     if not records: return
+#     sql = """
+#     INSERT INTO campaigns (campaign_id, name, objective, start_time, ad_account_id, status, effective_status, last_seen_at)
+#     VALUES (%(campaign_id)s, %(name)s, %(objective)s, %(start_time)s, %(ad_account_id)s, %(status)s, %(effective_status)s, NOW())
+#     ON DUPLICATE KEY UPDATE 
+#         name=VALUES(name), status=VALUES(status), effective_status=VALUES(effective_status), 
+#         last_seen_at=NOW(), real_status='ACTIVE'
+#     """
+#     from db.db import get_connection
+#     conn = get_connection()
+#     cursor = conn.cursor()
+#     try:
+#         # cursor.executemany(sql, records)
+#         # conn.commit()
+#         CHUNK_SIZE = 50
+
+#         for i in range(0, len(records), CHUNK_SIZE):
+#             chunk = records[i:i + CHUNK_SIZE]
+#             cursor.executemany(sql, chunk)
+#             conn.commit()
+#     finally:
+#         cursor.close()
+#         conn.close()
+
 def upsert_campaigns_batch(records: list[dict]) -> None:
-    if not records: return
+
+    if not records:
+        return
+
     sql = """
-    INSERT INTO campaigns (campaign_id, name, objective, start_time, ad_account_id, status, effective_status, last_seen_at)
-    VALUES (%(campaign_id)s, %(name)s, %(objective)s, %(start_time)s, %(ad_account_id)s, %(status)s, %(effective_status)s, NOW())
-    ON DUPLICATE KEY UPDATE 
-        name=VALUES(name), status=VALUES(status), effective_status=VALUES(effective_status), 
-        last_seen_at=NOW(), real_status='ACTIVE'
+    INSERT INTO campaigns (
+        campaign_id,
+        name,
+        objective,
+        start_time,
+        ad_account_id,
+        status,
+        effective_status,
+        last_seen_at
+    )
+    VALUES (
+        %(campaign_id)s,
+        %(name)s,
+        %(objective)s,
+        %(start_time)s,
+        %(ad_account_id)s,
+        %(status)s,
+        %(effective_status)s,
+        NOW()
+    )
+
+    ON DUPLICATE KEY UPDATE
+        name = IFNULL(VALUES(name), name),
+        objective = IFNULL(VALUES(objective), objective),
+        start_time = IFNULL(VALUES(start_time), start_time),
+        status = IFNULL(VALUES(status), status),
+        effective_status = IFNULL(VALUES(effective_status), effective_status),
+        last_seen_at = NOW()
     """
     from db.db import get_connection
     conn = get_connection()
     cursor = conn.cursor()
+    CHUNK_SIZE = 50
     try:
-        # cursor.executemany(sql, records)
-        # conn.commit()
-        CHUNK_SIZE = 50
 
         for i in range(0, len(records), CHUNK_SIZE):
             chunk = records[i:i + CHUNK_SIZE]
+            chunk.sort(key=lambda x: x["campaign_id"])
             cursor.executemany(sql, chunk)
             conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         cursor.close()
         conn.close()

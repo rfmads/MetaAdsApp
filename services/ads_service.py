@@ -254,9 +254,12 @@ def sync_ads_for_account(client, ad_account_id, mode="full", days=30):
             upsert_ads_batch(all_records)
             
         return {"level": "Ads", "account": act, "saved": len(all_records), "ok": True}
+    # except Exception as e:
+    #     logger.error(f"❌ Ads sync failed for {act}: {e}")
+    #     return {"level": "Ads", "account": act, "saved": len(all_records), "ok": False, "error": str(e)}  
     except Exception as e:
-        logger.error(f"❌ Ads sync failed for {act}: {e}")
-        return {"level": "Ads", "account": act, "saved": len(all_records), "ok": False, "error": str(e)}    
+        logger.exception(f"❌ ads sync failed for {act}")
+        raise  
 def sync_ads(user_token: str, mode: str = "full", days: int = 30) -> Dict[str, int]:
     """
     Legacy wrapper: NOT threaded. Prefer sync_ads_for_account(client, ...)

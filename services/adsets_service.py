@@ -61,8 +61,8 @@ def sync_adsets_for_account(client, ad_account_id, mode="full", days=30, **kwarg
             
         return {"level": "Adsets", "account": act, "saved": len(all_records), "ok": True}
     except Exception as e:
-        logger.error(f"❌ Adset sync failed for {act}: {e}")
-        return {"ok": False, "saved": 0, "error": str(e)}
+        logger.exception(f"❌ Adset sync failed for {act}")
+        raise
 
 def sync_adsets(user_token: str) -> None:
     from integrations.meta_graph_client import MetaGraphClient
