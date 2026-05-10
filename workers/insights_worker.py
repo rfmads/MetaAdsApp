@@ -70,7 +70,7 @@ def run(job_id=None):
         # You can choose to raise an exception or return gracefully
         return {"ok": False, "error": "Missing Token"}
 
-    max_workers = int(os.getenv("SYNC_WORKERS", "5"))
+    max_workers = int(os.getenv("SYNC_WORKERS", "4"))
     days = int(os.getenv("INSIGHTS_DAYS", "30"))
 
     logger.info(f"🚀 insights worker starting workers={max_workers} days={days}")

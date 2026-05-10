@@ -42,8 +42,14 @@ def upsert_adsets_batch(records: list[dict]) -> None:
     cursor = conn.cursor()
     try:
         # executemany sends all records in one go
-        cursor.executemany(sql, records)
-        conn.commit()
+        CHUNK_SIZE = 50
+
+        for i in range(0, len(records), CHUNK_SIZE):
+            chunk = records[i:i + CHUNK_SIZE]
+            cursor.executemany(sql, chunk)
+            conn.commit()
+        # cursor.executemany(sql, records)
+        # conn.commit()
     except Exception as e:
         conn.rollback()
         logger.error(f"❌ Adsets batch upsert failed: {e}")

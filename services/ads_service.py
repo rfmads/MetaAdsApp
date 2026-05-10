@@ -209,8 +209,14 @@ def upsert_ads_batch(records: list[dict]) -> None:
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        cursor.executemany(sql, records)
-        conn.commit()
+        # cursor.executemany(sql, records)
+        # conn.commit()
+        CHUNK_SIZE = 50
+
+        for i in range(0, len(records), CHUNK_SIZE):
+            chunk = records[i:i + CHUNK_SIZE]
+            cursor.executemany(sql, chunk)
+            conn.commit()
     finally:
         cursor.close()
         conn.close()
@@ -244,6 +250,7 @@ def sync_ads_for_account(client, ad_account_id, mode="full", days=30):
             })
         
         if all_records:
+            all_records.sort(key=lambda x: x["ad_id"])
             upsert_ads_batch(all_records)
             
         return {"level": "Ads", "account": act, "saved": len(all_records), "ok": True}

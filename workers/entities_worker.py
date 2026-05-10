@@ -37,8 +37,6 @@ def log_error_to_db(job_id, step, ad_account_id, error_message):
 # 🔹 Thread Worker Logic
 # =========================
 
-# entities_worker.py
-
 def _process_account(user_token: str, ad_account_id: int, portfolio_code: str, job_id=None):
     act = f"act_{ad_account_id}"
     logger.info(f"🧵 START {act} portfolio={portfolio_code}")
@@ -48,122 +46,168 @@ def _process_account(user_token: str, ad_account_id: int, portfolio_code: str, j
     result = {
         "ad_account_id": ad_account_id,
         "portfolio_code": portfolio_code,
-        "campaigns": {"saved": 0},
-        "adsets": {"saved": 0},
-        "ads": {"saved": 0},
+        "campaigns": {},
+        "adsets": {},
+        "ads": {},
         "errors": [],
     }
 
     try:
-        # Detect sync mode
+        # =========================
+        # 1. CAMPAIGNS (ROOT)
+        # =========================
         has_campaigns = query_dict(
             "SELECT 1 FROM campaigns WHERE ad_account_id=%(id)s LIMIT 1",
             {"id": ad_account_id},
         )
+
         first_time = not bool(has_campaigns)
         mode = "full" if first_time else "incremental"
-        sync_days = 90 if first_time else 14 
+        sync_days = 90 if first_time else 14
 
-        # 1. Sync Campaigns
         try:
-            result["campaigns"] = sync_campaigns_for_account(
-                client=client, ad_account_id=ad_account_id, mode=mode, days=sync_days
+            campaigns_res = sync_campaigns_for_account(
+                client=client,
+                ad_account_id=ad_account_id,
+                mode=mode,
+                days=sync_days
             )
-        except Exception as e:
-            err_msg = str(e)
-            result["errors"].append(f"Campaigns: {err_msg}")
-            log_error_to_db(job_id, "Campaigns", ad_account_id, err_msg)
-            # We don't 'return' here, we just move to the next step
 
-        # 2. Sync Adsets
-        try:
-            result["adsets"] = sync_adsets_for_account(
-                client=client, ad_account_id=ad_account_id, mode=mode, days=sync_days
-            )
-        except Exception as e:
-            err_msg = str(e)
-            result["errors"].append(f"Adsets: {err_msg}")
-            log_error_to_db(job_id, "Adsets", ad_account_id, err_msg)
+            result["campaigns"] = campaigns_res
 
-        # 3. Sync Ads
-        try:
-            result["ads"] = sync_ads_for_account(
-                client=client, ad_account_id=ad_account_id, mode=mode, days=sync_days
-            )
         except Exception as e:
-            err_msg = str(e)
-            result["errors"].append(f"Ads: {err_msg}")
-            log_error_to_db(job_id, "Ads", ad_account_id, err_msg)
+            err = f"Campaigns failed: {str(e)}"
+            logger.error(f"🔥 {act} {err}")
+            log_error_to_db(job_id, "Campaigns", ad_account_id, str(e))
+
+            result["errors"].append(err)
+
+            # 🚨 STOP PIPELINE HERE
+            return result
+
+        # =========================
+        # 2. ADBSETS (DEPENDENT ON CAMPAIGNS)
+        # =========================
+        try:
+            adsets_res = sync_adsets_for_account(
+                client=client,
+                ad_account_id=ad_account_id,
+                mode=mode,
+                days=sync_days
+            )
+
+            result["adsets"] = adsets_res
+
+        except Exception as e:
+            err = f"Adsets failed: {str(e)}"
+            logger.error(f"🔥 {act} {err}")
+            log_error_to_db(job_id, "Adsets", ad_account_id, str(e))
+
+            result["errors"].append(err)
+
+            # 🚨 STOP PIPELINE HERE
+            return result
+
+        # =========================
+        # 3. ADS (DEPENDENT ON ADBSETS)
+        # =========================
+        try:
+            ads_res = sync_ads_for_account(
+                client=client,
+                ad_account_id=ad_account_id,
+                mode=mode,
+                days=sync_days
+            )
+
+            result["ads"] = ads_res
+
+        except Exception as e:
+            err = f"Ads failed: {str(e)}"
+            logger.error(f"🔥 {act} {err}")
+            log_error_to_db(job_id, "Ads", ad_account_id, str(e))
+
+            result["errors"].append(err)
 
     except Exception as e:
-        # Catch-all for account-level crashes (e.g., token revoked)
+        # global crash only
         msg = f"Account Global Failure: {str(e)}"
         logger.error(f"🔥 {act} crashed: {msg}")
         log_error_to_db(job_id, "AccountGlobal", ad_account_id, msg)
+        result["errors"].append(msg)
 
-    logger.info(f"🧵 DONE {act} - errors found: {len(result['errors'])}")
+    logger.info(
+        f"🧵 DONE {act} | "
+        f"C={result['campaigns'].get('saved',0)} "
+        f"A={result['adsets'].get('saved',0)} "
+        f"D={result['ads'].get('saved',0)}"
+    )
+
     return result
+
 # def _process_account(user_token: str, ad_account_id: int, portfolio_code: str, job_id=None):
 #     act = f"act_{ad_account_id}"
 #     logger.info(f"🧵 START {act} portfolio={portfolio_code}")
 
 #     client = MetaGraphClient(user_token)
 
-#     # Detect sync mode
-#     has_campaigns = query_dict(
-#         "SELECT 1 FROM campaigns WHERE ad_account_id=%(id)s LIMIT 1",
-#         {"id": ad_account_id},
-#     )
-#     first_time = not bool(has_campaigns)
-#     mode = "full" if first_time else "incremental"
-#     sync_days = 90 if first_time else 14 
-
 #     result = {
 #         "ad_account_id": ad_account_id,
 #         "portfolio_code": portfolio_code,
-#         "campaigns": None,
-#         "adsets": None,
-#         "ads": None,
+#         "campaigns": {"saved": 0},
+#         "adsets": {"saved": 0},
+#         "ads": {"saved": 0},
 #         "errors": [],
 #     }
 
-#     # 1. Sync Campaigns
 #     try:
-#         result["campaigns"] = sync_campaigns_for_account(
-#             client=client, ad_account_id=ad_account_id, mode=mode, days=sync_days
+#         # Detect sync mode
+#         has_campaigns = query_dict(
+#             "SELECT 1 FROM campaigns WHERE ad_account_id=%(id)s LIMIT 1",
+#             {"id": ad_account_id},
 #         )
-#     except Exception as e:
-#         err_msg = str(e)
-#         logger.error(f"❌ campaigns failed {act}: {err_msg}")
-#         result["errors"].append(f"Campaigns: {err_msg}")
-#         log_error_to_db(job_id, "Campaigns", ad_account_id, err_msg)
-#         if "CRITICAL_TIMEOUT" in err_msg: return result
+#         first_time = not bool(has_campaigns)
+#         mode = "full" if first_time else "incremental"
+#         sync_days = 90 if first_time else 14 
 
-#     # 2. Sync Adsets
-#     try:
-#         result["adsets"] = sync_adsets_for_account(
-#             client=client, ad_account_id=ad_account_id, mode=mode, days=sync_days
-#         )
-#     except Exception as e:
-#         err_msg = str(e)
-#         logger.error(f"❌ adsets failed {act}: {err_msg}")
-#         result["errors"].append(f"Adsets: {err_msg}")
-#         log_error_to_db(job_id, "Adsets", ad_account_id, err_msg)
-#         if "CRITICAL_TIMEOUT" in err_msg: return result
+#         # 1. Sync Campaigns
+#         try:
+#             result["campaigns"] = sync_campaigns_for_account(
+#                 client=client, ad_account_id=ad_account_id, mode=mode, days=sync_days
+#             )
+#         except Exception as e:
+#             err_msg = str(e)
+#             result["errors"].append(f"Campaigns: {err_msg}")
+#             log_error_to_db(job_id, "Campaigns", ad_account_id, err_msg)
+#             # We don't 'return' here, we just move to the next step
 
-#     # 3. Sync Ads
-#     try:
-#         result["ads"] = sync_ads_for_account(
-#             client=client, ad_account_id=ad_account_id, mode=mode, days=sync_days
-#         )
-#     except Exception as e:
-#         err_msg = str(e)
-#         logger.error(f"❌ ads failed {act}: {err_msg}")
-#         result["errors"].append(f"Ads: {err_msg}")
-#         log_error_to_db(job_id, "Ads", ad_account_id, err_msg)
+#         # 2. Sync Adsets
+#         try:
+#             result["adsets"] = sync_adsets_for_account(
+#                 client=client, ad_account_id=ad_account_id, mode=mode, days=sync_days
+#             )
+#         except Exception as e:
+#             err_msg = str(e)
+#             result["errors"].append(f"Adsets: {err_msg}")
+#             log_error_to_db(job_id, "Adsets", ad_account_id, err_msg)
 
+#         # 3. Sync Ads
+#         try:
+#             result["ads"] = sync_ads_for_account(
+#                 client=client, ad_account_id=ad_account_id, mode=mode, days=sync_days
+#             )
+#         except Exception as e:
+#             err_msg = str(e)
+#             result["errors"].append(f"Ads: {err_msg}")
+#             log_error_to_db(job_id, "Ads", ad_account_id, err_msg)
+
+#     except Exception as e:
+#         # Catch-all for account-level crashes (e.g., token revoked)
+#         msg = f"Account Global Failure: {str(e)}"
+#         logger.error(f"🔥 {act} crashed: {msg}")
+#         log_error_to_db(job_id, "AccountGlobal", ad_account_id, msg)
+
+#     logger.info(f"🧵 DONE {act} - errors found: {len(result['errors'])}")
 #     return result
-
 # =========================
 # 🔹 Main Run Loop
 # =========================
@@ -173,7 +217,7 @@ def run(job_id=None):
         logger.error("❌ META_USER_TOKEN missing")
         return {"ok": False, "error": "Missing Token"}
 
-    max_workers = int(os.getenv("SYNC_WORKERS", "5"))
+    max_workers = int(os.getenv("SYNC_WORKERS", "4"))
 
     accounts = query_dict("""
         SELECT a.ad_account_id, p.code AS portfolio_code
@@ -195,24 +239,6 @@ def run(job_id=None):
         }
 
         total_synced = 0
-        # for future in as_completed(future_to_acc):
-        #     if job_id:
-        #         heartbeat(job_id)
-            
-        #     acc_info = future_to_acc[future]
-        #     try:
-        #         res = future.result() 
-                
-        #         # Calculate total saved
-        #         for level in ["campaigns", "adsets", "ads"]:
-        #             if res.get(level):
-        #                 total_synced += res[level].get("saved", 0)
-
-        #     except Exception as e:
-        #         err_msg = f"Critical thread crash: {str(e)}"
-        #         logger.error(f"🔥 {err_msg} for {acc_info['ad_account_id']}")
-        #         log_error_to_db(job_id, "ThreadCrash", acc_info['ad_account_id'], err_msg)
-        # inside run() function in entities_worker.py
 
         for future in as_completed(future_to_acc):
             if job_id:
@@ -236,125 +262,3 @@ def run(job_id=None):
 
         logger.info(f"🚀 FINISHED. Total entities saved: {total_synced}")
         return {"ok": True, "total_saved": total_synced}
-# from concurrent import futures
-# import os
-# import json
-# from concurrent.futures import ThreadPoolExecutor, as_completed
-
-# from logs.logger import logger
-# from db.db import query_dict
-# from integrations.meta_graph_client import MetaGraphClient
-
-# from services.campaigns_service import sync_campaigns_for_account
-# from services.adsets_service import sync_adsets_for_account
-# from services.ads_service import sync_ads_for_account
-# from db.config_store import get_config
-# from services.job_service import heartbeat
-
-# def _process_account(user_token: str, ad_account_id: int, portfolio_code: str):
-#     act = f"act_{ad_account_id}"
-#     logger.info(f"🧵 START {act} portfolio={portfolio_code}")
-
-#     client = MetaGraphClient(user_token)
-
-#     # Detect first run
-#     has_campaigns = query_dict(
-#         "SELECT 1 FROM campaigns WHERE ad_account_id=%(id)s LIMIT 1",
-#         {"id": ad_account_id},
-#     )
-#     first_time = not bool(has_campaigns)
-    
-#     # Logic: Full sync for new accounts, 14-day window for existing
-#     mode = "full" if first_time else "incremental"
-#     sync_days = 90 if first_time else 14 
-
-#     result = {
-#         "ad_account_id": ad_account_id,
-#         "portfolio_code": portfolio_code,
-#         "campaigns": None,
-#         "adsets": None,
-#         "ads": None,
-#         "errors": [],
-#     }
-
-#     # 1. Campaigns
-#     try:
-#         result["campaigns"] = sync_campaigns_for_account(
-#             client=client,
-#             ad_account_id=ad_account_id,
-#             mode=mode,
-#             days=sync_days
-#         )
-#     except Exception as e:
-#         logger.error(f"❌ campaigns failed {act}: {e}")
-#         result["errors"].append(f"Campaigns: {str(e)}")
-#         if "CRITICAL_TIMEOUT" in str(e): return result
-
-#     # 2. Adsets
-#     try:
-#         result["adsets"] = sync_adsets_for_account(
-#             client=client,
-#             ad_account_id=ad_account_id,
-#             mode=mode,
-#             days=sync_days
-#         )
-#     except Exception as e:
-#         logger.error(f"❌ adsets failed {act}: {e}")
-#         result["errors"].append(f"Adsets: {str(e)}")
-#         if "CRITICAL_TIMEOUT" in str(e): return result
-
-#     # 3. Ads
-#     try:
-#         result["ads"] = sync_ads_for_account(
-#             client=client,
-#             ad_account_id=ad_account_id,
-#             mode=mode,
-#             days=sync_days
-#         )
-#     except Exception as e:
-#         logger.error(f"❌ ads failed {act}: {e}")
-#         result["errors"].append(f"Ads: {str(e)}")
-
-#     logger.info(f"🧵 DONE {act} errors={len(result['errors'])}")
-#     return result
-
-# def run(job_id=None):
-# # 1. Pull token from DB instead of OS environment
-#     user_token = get_config("META_USER_TOKEN")
-    
-#     if not user_token:
-#         logger.error("❌ META_USER_TOKEN missing in database 'sys_config' table")
-#         # You can choose to raise an exception or return gracefully
-#         return {"ok": False, "error": "Missing Token"}
-#     max_workers = int(os.getenv("SYNC_WORKERS", "5")) # Increased to 5 as requests are lighter now
-
-#     accounts = query_dict("""
-#         SELECT a.ad_account_id, p.code AS portfolio_code
-#         FROM ad_accounts a
-#         JOIN portfolios p ON p.id = a.portfolio_id
-#         WHERE p.code IN ('RFM','MAGIC_EXTREME')
-#     """)
-#     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-#         futures = []
-#         for acc in accounts:
-#             user_token = get_config("META_USER_TOKEN")
-#             ad_account_id = int(acc["ad_account_id"])
-#             client = MetaGraphClient(user_token)
-#             # This prevents a slow 'Ads' sync from blocking 'Campaigns' for other accounts
-#             futures.append(executor.submit(sync_campaigns_for_account, client, ad_account_id))
-#             futures.append(executor.submit(sync_adsets_for_account, client, ad_account_id))
-#             futures.append(executor.submit(sync_ads_for_account, client, ad_account_id))
-#         total_synced = 0
-#         for future in as_completed(futures):
-#             # ❤️ HEARTBEAT: Move this to the top of the loop
-#             if job_id:
-#                 heartbeat(job_id)
-#             res = future.result()
-#             if isinstance(res, dict):
-#                 total_synced += res.get("saved", 0)
-#                 logger.info(f"Done: {res.get('level')} for {res.get('account')} | Saved: {res.get('saved')}")
-        
-#         logger.info(f"🚀 ALL ACCOUNTS FINISHED. Total entities saved: {total_synced}")
-
-# if __name__ == "__main__":
-#     run()

@@ -55,7 +55,8 @@ def sync_adsets_for_account(client, ad_account_id, mode="full", days=30, **kwarg
         
         if all_records:
             # You'll need to create this batch function in your repo
-            from db.repositories.adsets_repo import upsert_adsets_batch 
+            from db.repositories.adsets_repo import upsert_adsets_batch
+            all_records.sort(key=lambda x: x["adset_id"]) 
             upsert_adsets_batch(all_records)
             
         return {"level": "Adsets", "account": act, "saved": len(all_records), "ok": True}
@@ -93,90 +94,3 @@ def sync_adsets(user_token: str) -> None:
             failed_accounts += 1
 
     logger.info(f"✅ Adsets sync done. Total saved: {total_saved}. Failed accounts: {failed_accounts}")
-
-# def sync_adsets_for_account(
-#     client, 
-#     ad_account_id: int,
-#     portfolio_code: str = "",
-#     mode: str = "full",
-#     days: int = 30,
-# ) -> dict:
-#     act_id = f"act_{ad_account_id}"
-    
-#     # Calculate cutoff for incremental mode
-#     cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-#     # Format for Meta (e.g., 2026-04-15)
-#     cutoff_str = cutoff_date.strftime('%Y-%m-%d')
-
-#     saved = 0
-#     skipped = 0
-#     missing_campaigns = 0
-
-#     # 1. Load existing campaigns to avoid FK failures
-#     existing_campaigns = set()
-#     try:
-#         rows = query_dict(
-#             "SELECT campaign_id FROM campaigns WHERE ad_account_id = %(ad_account_id)s",
-#             {"ad_account_id": ad_account_id},
-#         )
-#         existing_campaigns = {int(r["campaign_id"]) for r in rows}
-#     except Exception:
-#         existing_campaigns = set()
-
-#     try:
-#         # ✅ Prepare Filters
-#         # We only want ACTIVE adsets. 
-#         # In incremental mode, we ALSO only want adsets updated recently.
-#         filters = [
-#             {"field": "effective_status", "operator": "IN", "value": ["ACTIVE"]}
-#         ]
-        
-#         if mode == "incremental":
-#             filters.append({"field": "updated_time", "operator": "GREATER_THAN", "value": cutoff_str})
-
-#         params = {
-#             "fields": FIELDS,
-#             "limit": 250, # Higher limit is faster
-#             "filtering": json.dumps(filters)
-#         }
-
-#         logger.info(f"▶️ adsets sync start {act_id} (ACTIVE + {mode})")
-
-#         # ✅ get_paged now receives much less data
-#         for a in client.get_paged(f"{act_id}/adsets", params=params):
-            
-#             campaign_id = a.get("campaign_id")
-#             if not campaign_id:
-#                 skipped += 1
-#                 continue
-
-#             campaign_id_int = int(campaign_id)
-
-#             # Avoid FK error
-#             if existing_campaigns and campaign_id_int not in existing_campaigns:
-#                 missing_campaigns += 1
-#                 skipped += 1
-#                 continue
-
-#             start = _as_utc(parse_meta_datetime(a.get("start_time")))
-
-#             upsert_adset({
-#                 "adset_id": int(a["id"]),
-#                 "campaign_id": campaign_id_int,
-#                 "ad_account_id": int(ad_account_id),
-#                 "name": a.get("name"),
-#                 "status": a.get("status"),
-#                 "effective_status": a.get("effective_status"),
-#                 "daily_budget": a.get("daily_budget"),
-#                 "start_time": start.replace(tzinfo=None) if start else None,
-#                 "billing_event": a.get("billing_event"),
-#                 "optimization_goal": a.get("optimization_goal"),
-#             })
-#             saved += 1
-
-#         logger.info(f"✅ adsets synced {act_id} saved={saved} skipped={skipped}")
-#         return {"ok": True, "saved": saved, "skipped": skipped, "missing_campaigns": missing_campaigns}
-
-#     except Exception as e:
-#         logger.error(f"❌ adsets failed for {act_id}: {e}")
-#         return {"ok": False, "saved": saved, "skipped": skipped, "missing_campaigns": missing_campaigns, "error": str(e)}

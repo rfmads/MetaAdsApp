@@ -44,7 +44,7 @@ def run(job_id=None):
         logger.error("❌ META_USER_TOKEN missing in database 'sys_config' table")
         # You can choose to raise an exception or return gracefully
         return {"ok": False, "error": "Missing Token"}
-    workers = int(os.getenv("SYNC_WORKERS", "5"))
+    workers = int(os.getenv("SYNC_WORKERS", "4"))
     days = int(os.getenv("CREATIVES_DAYS", "14")) # Suggesting 14 for incremental
     mode = os.getenv("CREATIVES_MODE", "incremental")
 

@@ -89,8 +89,14 @@ def upsert_campaigns_batch(records: list[dict]) -> None:
     conn = get_connection()
     cursor = conn.cursor()
     try:
-        cursor.executemany(sql, records)
-        conn.commit()
+        # cursor.executemany(sql, records)
+        # conn.commit()
+        CHUNK_SIZE = 50
+
+        for i in range(0, len(records), CHUNK_SIZE):
+            chunk = records[i:i + CHUNK_SIZE]
+            cursor.executemany(sql, chunk)
+            conn.commit()
     finally:
         cursor.close()
         conn.close()
@@ -165,73 +171,6 @@ def sync_campaigns_for_account(client, ad_account_id, mode="full", days=30):
         })
     
     if all_records:
+        all_records.sort(key=lambda x: x["campaign_id"])
         upsert_campaigns_batch(all_records)
     return {"level": "Campaigns", "account": act, "saved": len(all_records)}
-
-# def sync_campaigns_for_account(
-#     user_token: str,
-#     ad_account_id: int,
-#     portfolio_code: str = "",
-#     mode: str = "full",
-#     days: int = 365,
-# ) -> Dict[str, Any]:
-#     client = MetaGraphClient(user_token)
-#     act = f"act_{ad_account_id}"
-#     saved = 0
-#     skipped = 0
-
-#     logger.info(f"▶️ campaigns sync start {act} (ACTIVE ONLY)")
-
-#     try:
-#         # ✅ Filter at the API level for performance
-#         # This tells Meta: "Only send me campaigns that are currently ACTIVE"
-#         active_filter = [
-#             {
-#                 "field": "effective_status",
-#                 "operator": "IN",
-#                 "value": ["ACTIVE"]
-#             }
-#         ]
-
-#         params = {
-#             "fields": CAMPAIGN_FIELDS, 
-#             "limit": 250, # Increased limit because filtered results are lighter
-#             "filtering": json.dumps(active_filter) 
-#         }
-
-#         # If mode is not 'full', you could also add a 'time_range' filter here 
-#         # to only get campaigns modified recently.
-
-#         for c in client.get_paged(f"{act}/campaigns", params=params):
-#             cid = c.get("id")
-#             if not cid:
-#                 skipped += 1
-#                 continue
-
-#             campaign_id = int(cid)
-
-#             record = {
-#                 "campaign_id": campaign_id,
-#                 "name": c.get("name"),
-#                 "objective": c.get("objective"),
-#                 "start_time": _parse_dt(c.get("start_time")),
-#                 "ad_account_id": int(ad_account_id),
-#                 "status": c.get("status"),
-#                 "effective_status": c.get("effective_status"),
-#             }
-
-#             # 1. Save the campaign
-#             upsert_campaign(record)
-
-#             # 2. Update real_status (It will always be ACTIVE because of our filter)
-#             sql_real = "UPDATE campaigns SET real_status = 'ACTIVE' WHERE campaign_id = %s"
-#             execute(sql_real, (campaign_id,))
-
-#             saved += 1
-
-        # logger.info(f"✅ campaigns synced for {act} saved={saved}")
-        # return {"ok": True, "saved": saved, "skipped": skipped}
-
-    # except Exception as e:
-    #     logger.error(f"❌ campaigns failed for {act}: {e}")
-    #     return {"ok": False, "saved": saved, "skipped": skipped, "error": str(e)}

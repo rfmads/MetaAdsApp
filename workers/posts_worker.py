@@ -59,7 +59,7 @@ def run(job_id=None):
         # You can choose to raise an exception or return gracefully
         return {"ok": False, "error": "Missing Token"}
     hours = int(os.getenv("POSTS_HOURS", "48"))
-    workers = int(os.getenv("SYNC_WORKERS", "5")) # Lighter requests allow more workers
+    workers = int(os.getenv("SYNC_WORKERS", "4")) # Lighter requests allow more workers
 
     pages = query_dict("SELECT page_id, page_access_token, ig_user_id FROM pages")
 

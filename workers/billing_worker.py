@@ -32,7 +32,7 @@ def run():
         # You can choose to raise an exception or return gracefully
         return {"ok": False, "error": "Missing Token"}
 
-    workers = int(os.getenv("SYNC_WORKERS", "5")) # Billing is fast, can handle more workers
+    workers = int(os.getenv("SYNC_WORKERS", "4")) # Billing is fast, can handle more workers
 
     accounts = query_dict("""
         SELECT a.ad_account_id, p.code AS portfolio_code
