@@ -58,7 +58,7 @@ def update_job_status(job_id, status, error=None):
 def get_running_job():
     rows = query_dict("""
         SELECT * FROM pipeline_jobs
-        WHERE status = 'RUNNING'
+        WHERE status IN ('RUNNING', 'PENDING')
         ORDER BY created_at DESC
         LIMIT 1
     """)
@@ -69,7 +69,7 @@ def cleanup_stuck_jobs():
         UPDATE pipeline_jobs
         SET status='FAILED',
             error_message='Timeout'
-        WHERE status='RUNNING'
+        WHERE status IN('RUNNING','PENDING')
         AND updated_at < NOW() - INTERVAL 60 MINUTE
     """)
 
