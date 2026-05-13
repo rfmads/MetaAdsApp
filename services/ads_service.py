@@ -207,7 +207,7 @@ def upsert_ads_batch(records: list[dict]) -> None:
     # Assuming your db module has a way to get a raw connection or an executemany wrapper
     from db.db import get_connection 
     conn = get_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(buffered=True)
     try:
         # cursor.executemany(sql, records)
         # conn.commit()

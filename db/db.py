@@ -27,7 +27,7 @@ def _get_pool() -> pooling.MySQLConnectionPool:
 
             _POOL = pooling.MySQLConnectionPool(
                 pool_name="metaads_pool",
-                pool_size=100,
+                pool_size=32,
                 host=DB_HOST,
                 port=DB_PORT,
                 user=DB_USER,
@@ -111,7 +111,7 @@ def execute(sql: str, params: ParamsType = None) -> int:
     cur = None
 
     try:
-        cur = conn.cursor()
+        conn.cursor(buffered=True)
         cur.execute(sql, params or {})
         conn.commit()
         return cur.rowcount
@@ -134,7 +134,7 @@ def execute_many(sql: str, rows: Iterable[Union[Dict[str, Any], Sequence[Any]]])
     cur = None
 
     try:
-        cur = conn.cursor()
+        conn.cursor(buffered=True)
         cur.executemany(sql, list(rows))
         conn.commit()
         return cur.rowcount
@@ -201,7 +201,7 @@ def query_scalar(sql: str, params: ParamsType = None) -> Any:
     cur = None
 
     try:
-        cur = conn.cursor()
+        conn.cursor(buffered=True)
         cur.execute(sql, params or {})
         row = cur.fetchone()
         return row[0] if row else None

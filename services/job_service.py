@@ -8,7 +8,7 @@ def create_job(include_static=None, include_insights=True):
     """
 
     conn = get_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(buffered=True)
 
     cursor.execute(sql, {
         "include_static": include_static,

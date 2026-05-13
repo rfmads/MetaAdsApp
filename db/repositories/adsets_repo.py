@@ -39,7 +39,7 @@ def upsert_adsets_batch(records: list[dict]) -> None:
     """
 
     conn = get_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(buffered=True)
     try:
         # executemany sends all records in one go
         CHUNK_SIZE = 50
