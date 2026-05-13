@@ -206,7 +206,7 @@ def sync_campaigns_for_account(client, ad_account_id, mode="full", days=30):
     # ,"filtering": json.dumps(filters)
     params = {
         "fields": CAMPAIGN_FIELDS,
-        "limit": 150,
+        "limit": 100,
         "filtering": json.dumps(filters) if filters else None
     }
 

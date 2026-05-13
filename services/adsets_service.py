@@ -31,7 +31,7 @@ def sync_adsets_for_account(client, ad_account_id, mode="full", days=30, **kwarg
 # 
     params = {
         "fields": ADSET_FIELDS, 
-        "limit": 150,
+        "limit": 100,
         "filtering": json.dumps(filters)
     }
 
