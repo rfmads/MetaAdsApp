@@ -138,7 +138,7 @@ def query_dict(sql: str, params: ParamsType = None) -> List[Dict[str, Any]]:
     cur = None
 
     try:
-        cur = conn.cursor(dictionary=True)
+        cur = conn.cursor(dictionary=True, buffered=True)
         cur.execute(sql, params or {})
         return cur.fetchall()
 
@@ -160,7 +160,7 @@ def query_one(sql: str, params: ParamsType = None) -> Optional[Dict[str, Any]]:
     cur = None
 
     try:
-        cur = conn.cursor(dictionary=True)
+        cur = conn.cursor(dictionary=True, buffered=True)
         cur.execute(sql, params or {})
         return cur.fetchone()
 

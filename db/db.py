@@ -27,7 +27,7 @@ def _get_pool() -> pooling.MySQLConnectionPool:
 
             _POOL = pooling.MySQLConnectionPool(
                 pool_name="metaads_pool",
-                pool_size=32,
+                pool_size=100,
                 host=DB_HOST,
                 port=DB_PORT,
                 user=DB_USER,
@@ -49,23 +49,42 @@ def _get_pool() -> pooling.MySQLConnectionPool:
 # =========================
 # CONNECTION HANDLING
 # =========================
-def get_connection() -> MySQLConnection:
-    try:
-        conn = _get_pool().get_connection()
+import time
 
-        # safer than ping reconnect loop
-        if not conn.is_connected():
-            conn.reconnect(attempts=2, delay=1)
+def get_connection(retries=5, delay=0.2) -> MySQLConnection:
+    last_error = None
 
-        return conn
+    for attempt in range(retries):
+        try:
+            logger.debug("Acquiring DB connection")
 
-    except errors.PoolError as e:
-        logger.error(f"❌ Connection pool exhausted: {e}")
-        raise Exception("Database is busy. Try again later.")
+            conn = _get_pool().get_connection()
 
-    except Exception as e:
-        logger.error(f"❌ Failed to get DB connection: {e}", exc_info=True)
-        raise
+            if not conn.is_connected():
+                conn.reconnect(attempts=2, delay=1)
+
+            return conn
+
+        except errors.PoolError as e:
+            last_error = e
+
+            logger.warning(
+                f"Pool exhausted "
+                f"(attempt {attempt + 1}/{retries})"
+            )
+
+            time.sleep(delay)
+
+        except Exception as e:
+            logger.error(
+                f"❌ Failed to get DB connection: {e}",
+                exc_info=True
+            )
+            raise
+
+    logger.error(f"❌ Pool exhausted after retries: {last_error}")
+
+    raise Exception("Database is busy. Try again later.")
 
 
 # =========================
@@ -138,7 +157,7 @@ def query_dict(sql: str, params: ParamsType = None) -> List[Dict[str, Any]]:
     cur = None
 
     try:
-        cur = conn.cursor(dictionary=True)
+        cur = conn.cursor(dictionary=True, buffered=True)
         cur.execute(sql, params or {})
         return cur.fetchall()
 
