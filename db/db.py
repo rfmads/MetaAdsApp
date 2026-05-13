@@ -5,6 +5,7 @@ from mysql.connector.connection import MySQLConnection
 from mysql.connector import errors
 from config.config import DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
 from logs.logger import logger
+import time
 
 ParamsType = Optional[Union[Dict[str, Any], Sequence[Any]]]
 
@@ -17,8 +18,6 @@ _POOL: Optional[pooling.MySQLConnectionPool] = None
 def _get_pool() -> pooling.MySQLConnectionPool:
     global _POOL
 
-    logger.info(f"_get_pool called, pool is None? {_POOL is None}")
-
     if _POOL is None:
         try:
             logger.info(
@@ -27,19 +26,23 @@ def _get_pool() -> pooling.MySQLConnectionPool:
 
             _POOL = pooling.MySQLConnectionPool(
                 pool_name="metaads_pool",
-                pool_size=32,
+                pool_size=32,  # MAX allowed by mysql-connector
+
                 host=DB_HOST,
                 port=DB_PORT,
                 user=DB_USER,
                 password=DB_PASSWORD,
                 database=DB_NAME,
+
                 autocommit=True,
                 pool_reset_session=True,
+                connection_timeout=10,
+                use_pure=True,
             )
 
             logger.info("MySQL connection pool initialized successfully (size=32).")
 
-        except Exception as e:
+        except Exception:
             logger.error("❌ Failed to initialize MySQL pool", exc_info=True)
             raise
 
@@ -49,15 +52,11 @@ def _get_pool() -> pooling.MySQLConnectionPool:
 # =========================
 # CONNECTION HANDLING
 # =========================
-import time
-
 def get_connection(retries=5, delay=0.2) -> MySQLConnection:
     last_error = None
 
     for attempt in range(retries):
         try:
-            logger.debug("Acquiring DB connection")
-
             conn = _get_pool().get_connection()
 
             if not conn.is_connected():
@@ -67,23 +66,14 @@ def get_connection(retries=5, delay=0.2) -> MySQLConnection:
 
         except errors.PoolError as e:
             last_error = e
-
-            logger.warning(
-                f"Pool exhausted "
-                f"(attempt {attempt + 1}/{retries})"
-            )
-
+            logger.warning(f"Pool exhausted (attempt {attempt + 1}/{retries})")
             time.sleep(delay)
 
         except Exception as e:
-            logger.error(
-                f"❌ Failed to get DB connection: {e}",
-                exc_info=True
-            )
+            logger.error(f"❌ Failed to get DB connection: {e}", exc_info=True)
             raise
 
     logger.error(f"❌ Pool exhausted after retries: {last_error}")
-
     raise Exception("Database is busy. Try again later.")
 
 
@@ -111,9 +101,9 @@ def execute(sql: str, params: ParamsType = None) -> int:
     cur = None
 
     try:
-        conn.cursor(buffered=True)
+        cur = conn.cursor(buffered=True)
         cur.execute(sql, params or {})
-        conn.commit()
+
         return cur.rowcount
 
     except mysql.connector.Error as e:
@@ -134,9 +124,9 @@ def execute_many(sql: str, rows: Iterable[Union[Dict[str, Any], Sequence[Any]]])
     cur = None
 
     try:
-        conn.cursor(buffered=True)
+        cur = conn.cursor(buffered=True)
         cur.executemany(sql, list(rows))
-        conn.commit()
+
         return cur.rowcount
 
     except mysql.connector.Error as e:
@@ -159,6 +149,7 @@ def query_dict(sql: str, params: ParamsType = None) -> List[Dict[str, Any]]:
     try:
         cur = conn.cursor(dictionary=True, buffered=True)
         cur.execute(sql, params or {})
+
         return cur.fetchall()
 
     except mysql.connector.Error as e:
@@ -179,8 +170,9 @@ def query_one(sql: str, params: ParamsType = None) -> Optional[Dict[str, Any]]:
     cur = None
 
     try:
-        cur = conn.cursor(dictionary=True)
+        cur = conn.cursor(dictionary=True, buffered=True)
         cur.execute(sql, params or {})
+
         return cur.fetchone()
 
     except mysql.connector.Error as e:
@@ -201,8 +193,9 @@ def query_scalar(sql: str, params: ParamsType = None) -> Any:
     cur = None
 
     try:
-        conn.cursor(buffered=True)
+        cur = conn.cursor(buffered=True)
         cur.execute(sql, params or {})
+
         row = cur.fetchone()
         return row[0] if row else None
 
