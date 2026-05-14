@@ -23,7 +23,7 @@ def get_facebook_metrics(token):
     if not running_job:
         # 3. No job is running, so create and start one in the background
         job_id = create_job(include_static=include_static)
-        update_job_status(job_id, "RUNNING")
+        # update_job_status(job_id, "RUNNING")
 
         job_context = {
             "id": job_id,
@@ -31,11 +31,16 @@ def get_facebook_metrics(token):
         }
 
         # Fire and forget: the thread runs independently of this request
+    try:
         Thread(
             target=run_pipeline_job,
             args=(job_context,),
             daemon=True
         ).start()
+
+    except Exception as e:
+        update_job_status(job_id, "FAILED", str(e))
+        raise
         
 
     # 4. IMMEDIATELY return existing data

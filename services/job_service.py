@@ -7,17 +7,28 @@ def create_job(include_static=None, include_insights=True):
     VALUES ('full_pipeline', %(include_static)s, %(include_insights)s)
     """
 
-    conn = get_connection()
-    cursor = conn.cursor(buffered=True)
+    conn = None
+    cursor = None
 
-    cursor.execute(sql, {
-        "include_static": include_static,
-        "include_insights": include_insights
-    })
+    try:
+        conn = get_connection()
+        cursor = conn.cursor(buffered=True)
 
-    conn.commit()
+        cursor.execute(sql, {
+            "include_static": include_static,
+            "include_insights": include_insights
+        })
 
-    return cursor.lastrowid   # ⭐ THIS IS THE FIX
+        conn.commit()
+
+        return cursor.lastrowid
+
+    finally:
+        if cursor:
+            cursor.close()
+
+        if conn:
+            conn.close()  # ⭐ THIS IS THE FIX
 
 def get_pending_jobs(limit=1):
     return query_dict("""
@@ -70,7 +81,7 @@ def cleanup_stuck_jobs():
         SET status='FAILED',
             error_message='Timeout'
         WHERE status IN('RUNNING','PENDING')
-        AND updated_at < NOW() - INTERVAL 60 MINUTE
+        AND updated_at < NOW() - INTERVAL 20 MINUTE
     """)
 
 
