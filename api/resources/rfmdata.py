@@ -13,44 +13,46 @@ rfmdata = Blueprint("rfmdata", __name__, url_prefix="/api")
 @rfmdata.route("/get_facebook_metrics/", defaults={"token": None}, methods=["GET"])
 @rfmdata.route("/get_facebook_metrics/<path:token>", methods=["GET"])
 def get_facebook_metrics(token):
-    # 1. Parse arguments
+
     include_static = None
-    # 1. Cleanup stuck jobs before starting a new one. This ensures we don't have "RUNNING" jobs that are actually stuck due to crashes or timeouts.
+
+    # Cleanup stuck jobs
     cleanup_stuck_jobs()
-    # 2. Check for an existing running job
+
+    # Check if a job is already running
     running_job = get_running_job()
 
     if not running_job:
-        # 3. No job is running, so create and start one in the background
+
         job_id = create_job(include_static=include_static)
-        # update_job_status(job_id, "RUNNING")
 
         job_context = {
             "id": job_id,
             "include_static": include_static
         }
 
-        # Fire and forget: the thread runs independently of this request
-    try:
-        Thread(
-            target=run_pipeline_job,
-            args=(job_context,),
-            daemon=True
-        ).start()
+        try:
+            Thread(
+                target=run_pipeline_job,
+                args=(job_context,),
+                daemon=True
+            ).start()
 
-    except Exception as e:
-        update_job_status(job_id, "FAILED", str(e))
-        raise
-        
+        except Exception as e:
+            update_job_status(job_id, "FAILED", str(e))
+            raise
 
-    # 4. IMMEDIATELY return existing data
-    # We do NOT wait for the thread. We return what is currently in the DB.
+    # Return existing data immediately
     try:
         raw_data = fetch_account_metrics()
         data = format_to_dataslayer(raw_data)
         return jsonify(data), 200
+
     except Exception as e:
-        return jsonify({"error": "Failed to fetch existing data", "details": str(e)}), 500
+        return jsonify({
+            "error": "Failed to fetch existing data",
+            "details": str(e)
+        }), 500
     
 @rfmdata.route("/get_facebook_insights/", defaults={"token": None}, methods=["GET"])
 @rfmdata.route("/get_facebook_insights/<path:token>", methods=["GET"])
