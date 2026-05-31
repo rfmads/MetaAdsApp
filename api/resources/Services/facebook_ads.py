@@ -57,10 +57,10 @@ def fetch_account_metrics():
     a.ad_account_id AS 'Account id',
     a.currency AS 'Account Currency',
     b.balance AS 'Balance',
-    CASE
-        WHEN b.account_status = 1 THEN 'ACTIVE'
-        ELSE 'UNKNOWN'
-    END AS 'Account status',
+    (SELECT acc.ad_account_desc_eng FROM MetaAdsdb.ad_account_status acc 
+    where acc.ad_account_status_status =1 
+                      and acc.ad_account_status_code =b.account_status )                  
+                       AS 'Account status',
     b.amount_spent AS 'Account amount spent',
     'PS' AS 'Business country code',
     COALESCE(SUM(i.results), 0) AS 'Clicks',
@@ -69,7 +69,6 @@ FROM
     ad_accounts a
         INNER JOIN
     billing b ON b.ad_account_id = a.ad_account_id
-        AND b.account_status = 1
         LEFT JOIN adsets s ON s.ad_account_id = a.ad_account_id
         LEFT JOIN ads ad ON ad.adset_id = s.adset_id
         LEFT JOIN ad_daily_insights i ON i.ad_id = ad.ad_id 
